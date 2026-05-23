@@ -16,10 +16,9 @@ blackmatrix7 单 App 精细控制
 
 ## 文件
 
-- `Surge.conf` — 主配置入口。
-- `Surge-SukkaW-Blackmatrix7.conf` — 与主配置同内容，保留描述性文件名。
+- `Surge.conf` — 唯一主配置入口。
 - `sources/rules.yaml` — 上游规则源定义。
-- `scripts/generate.py` — 拉取并拆分 blackmatrix7 mixed list，更新配置。
+- `scripts/generate.py` — 拉取并拆分 blackmatrix7 mixed list，更新 `Surge.conf`。
 - `scripts/validate.py` — 校验规则 URL、策略组引用、顺序和安全项。
 - `rules/blackmatrix7/` — 生成后的 blackmatrix7 app 规则，分为 `non_ip` / `ip`。
 - `docs/design.md` — 项目架构和规则设计说明。

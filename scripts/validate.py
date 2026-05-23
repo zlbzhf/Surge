@@ -23,7 +23,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from generate import load_sources  # noqa: E402
 
-CONFIG_FILES = [ROOT / "Surge.conf", ROOT / "Surge-SukkaW-Blackmatrix7.conf"]
+CONFIG_FILES = [ROOT / "Surge.conf"]
 BUILTIN_POLICIES = {"DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP"}
 BLACKMATRIX7_MIXED_PREFIX = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Surge/"
 

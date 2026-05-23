@@ -23,7 +23,7 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES_FILE = ROOT / "sources" / "rules.yaml"
 GENERATED_DIR = ROOT / "rules" / "blackmatrix7"
-CONFIG_FILES = [ROOT / "Surge.conf", ROOT / "Surge-SukkaW-Blackmatrix7.conf"]
+CONFIG_FILES = [ROOT / "Surge.conf"]
 
 IP_RULE_PREFIXES = {
     "IP-CIDR",

@@ -94,7 +94,7 @@ python3 scripts/validate.py
 - 读取 `sources/rules.yaml`。
 - 拉取 blackmatrix7 上游规则。
 - 拆分 non_ip / ip。
-- 更新 `Surge.conf` 和 `Surge-SukkaW-Blackmatrix7.conf`。
+- 更新唯一主配置 `Surge.conf`。
 
 `validate.py` 负责：
 
