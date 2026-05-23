@@ -329,7 +329,7 @@ def check_bsbsb_module() -> list[Issue]:
         ("#!name=BilibiliSponsorBlock 空降助手", "module should have a stable human-readable name"),
         ("DOMAIN,bsbsb.top,{{{API策略}}}", "bsbsb.top should be routed by the configurable API policy"),
         (BSBSB_SCRIPT_URL, "module should reference the same-repo airborne script URL"),
-        ("bilibili-bsbsb.airborne.js?v=20260523-summary-beauty-1", "module should cache-bust the airborne script URL after summary visual tuning so Surge does not run a stale oversized summary script"),
+        ("bilibili-bsbsb.airborne.js?v=20260523-summary-lines-1", "module should cache-bust the airborne script URL after multiline summary tuning so Surge does not run a stale single-line summary script"),
         ("DmSegMobile", "module should hook the Bilibili danmaku segment endpoint"),
         ("bilibili.bsbsb.chronos", "module should install the Chronos response hook required for automatic seeking"),
         ("type=http-response", "Chronos hook should run as an HTTP response script"),
@@ -420,22 +420,25 @@ def check_bsbsb_module() -> list[Issue]:
         )
     if "categoryLabel" not in script_text:
         issues.append(Issue(BSBSB_SCRIPT, 1, "script should keep category label metadata in extra JSON / POI display text"))
-    if "message.elems.unshift(createSummaryDanmaku" not in script_text:
-        issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku should be prepended before normal danmaku elems so it is not dropped by list order/limits"))
+    if "message.elems.unshift(...createSummaryDanmaku" not in script_text:
+        issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku lines should be prepended before normal danmaku elems so they are not dropped by list order/limits"))
     summary_field_needles = [
-        ('const summaryId = "900000"', "summary danmaku should use a small numeric id like known-working airborne danmaku"),
+        ('String(900000 + index)', "summary danmaku lines should use small numeric ids like known-working airborne danmaku"),
         ("idStr: summaryId", "summary danmaku idStr should stay numeric, not a custom label"),
         ("attr: 1310724", "summary danmaku should reuse the known-visible airborne attr"),
         ('extra: ""', "summary danmaku should avoid custom extra metadata that may be filtered by the client"),
         ("chooseSummaryProgressMs(segments, options, segmentIndex)", "summary danmaku should use segment-aware delayed timing instead of a fixed too-early timestamp"),
         ("SUMMARY_DANMAKU_FONTSIZE = 25", "summary danmaku should use a smaller mobile-friendly font size instead of the large airborne skip font"),
-        ("content: summary.content", "summary danmaku should use compact summary text distinct from exact skip trigger text"),
+        ("summary.lines.map", "summary danmaku should render one top-card line per summary row to mimic multiline display"),
+        ("空降助手提示", "summary danmaku should include a short title line"),
+        ("将为您自动跳过", "skip summary lines should clearly say they will be auto-skipped"),
+        ("可手动空降", "POI summary lines should clearly say they are manual jumps"),
         ("action: `airborne:${progress}`", "summary danmaku should use a self-target airborne action so Bilibili shows it through the same visible path as working airborne prompts"),
     ]
     for needle, message in summary_field_needles:
         if needle not in script_text:
             issues.append(Issue(BSBSB_SCRIPT, 1, message))
-    if "content: summary.content" not in script_text:
+    if "summary.lines.map" not in script_text:
         issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku content must stay distinct from exact skip trigger text so it does not auto-seek"))
 
     doc_checks = [

@@ -1016,3 +1016,41 @@ diff --git a/modules/bilibili-bsbsb.sgmodule b/modules/bilibili-bsbsb.sgmodule
 @@
 -script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js?v=20260523-summary-segment-aware-2
 +script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js?v=20260523-summary-beauty-1
+
+
+# Incremental fix: multiline summary danmaku rows
+# Rationale: Bilibili danmaku cards do not reliably render embedded newlines. Render the summary as several top-card danmaku elems at the same progress: one title line, one line per skip category, and one POI/highlight line when present.
+diff --git a/modules/scripts/bilibili-bsbsb.airborne.js b/modules/scripts/bilibili-bsbsb.airborne.js
+--- a/modules/scripts/bilibili-bsbsb.airborne.js
++++ b/modules/scripts/bilibili-bsbsb.airborne.js
+@@
+-  const parts = [];
++  const lines = ["空降助手提示"];
++  const skipGroups = new Map();
+@@
+-    content: parts.length ? `空降 ${parts.join(" · ")}` : "",
++    lines,
++    content: lines.join("；"),
+@@
+-    message.elems.unshift(createSummaryDanmaku(segments, options, ctx2.state.segmentIndex));
++    message.elems.unshift(...createSummaryDanmaku(segments, options, ctx2.state.segmentIndex));
+@@
+-  const summaryId = "900000";
+   const progress = chooseSummaryProgressMs(segments, options, segmentIndex);
+-  return {
++  return summary.lines.map((content, index) => {
++    const summaryId = String(900000 + index);
++    return {
+@@
+-    content: summary.content,
++    content,
+@@
+-  };
++    };
++  });
+diff --git a/modules/bilibili-bsbsb.sgmodule b/modules/bilibili-bsbsb.sgmodule
+--- a/modules/bilibili-bsbsb.sgmodule
++++ b/modules/bilibili-bsbsb.sgmodule
+@@
+-script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js?v=20260523-summary-beauty-1
++script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js?v=20260523-summary-lines-1

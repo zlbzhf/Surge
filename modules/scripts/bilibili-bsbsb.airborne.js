@@ -4545,22 +4545,29 @@ function summarizeSegments(segments) {
   const poiSegments = segments.filter((segment) => segment.actionType === "poi");
   const skipDurationSeconds = Math.round(skipSegments.reduce((total, segment) => total + Math.max(0, segment.end - segment.start), 0));
   const categories = [...new Set(segments.map((segment) => segment.category).filter(Boolean))];
-  const parts = [];
-  if (skipSegments.length) {
-    parts.push(`${skipSegments.length}段·${formatDuration(skipDurationSeconds)}`);
+  const lines = ["空降助手提示"];
+  const skipGroups = /* @__PURE__ */ new Map();
+  for (const segment of skipSegments) {
+    const category = segment.category || "sponsor";
+    const current = skipGroups.get(category) || { count: 0, duration: 0 };
+    current.count += 1;
+    current.duration += Math.max(0, segment.end - segment.start);
+    skipGroups.set(category, current);
+  }
+  for (const [category, group] of skipGroups) {
+    const label = CATEGORY_SHORT_LABELS[category] || category;
+    lines.push(`本视频含 ${group.count} 段${label}，${formatDuration(group.duration)}，将为您自动跳过`);
   }
   if (poiSegments.length) {
-    parts.push(`高能${poiSegments.length}`);
-  }
-  if (categories.length) {
-    parts.push(categories.map((category) => CATEGORY_SHORT_LABELS[category] || category).slice(0, 3).join("/"));
+    lines.push(`本视频含 ${poiSegments.length} 个高能，可手动空降`);
   }
   return {
     skipCount: skipSegments.length,
     poiCount: poiSegments.length,
     skipDurationSeconds,
     categories,
-    content: parts.length ? `空降 ${parts.join(" · ")}` : "",
+    lines,
+    content: lines.join("；"),
     signature: [skipSegments.length, skipDurationSeconds, poiSegments.length, categories.join("|")].join(":")
   };
 }
@@ -4593,7 +4600,7 @@ var handleDmSegMobileReply = (ctx2, next) => {
   const options = ctx2.state.sponsorBlockOptions;
   const segments = ctx2.state.segments;
   if (ctx2.state.includeSummaryDanmaku) {
-    message.elems.unshift(createSummaryDanmaku(segments, options, ctx2.state.segmentIndex));
+    message.elems.unshift(...createSummaryDanmaku(segments, options, ctx2.state.segmentIndex));
   }
   message.elems.push(...createAirborneDanmaku(segments, options));
   ctx2.response.bodyBytes = DmSegMobileReply.toBinary(message);
@@ -4601,29 +4608,31 @@ var handleDmSegMobileReply = (ctx2, next) => {
 };
 function createSummaryDanmaku(segments, options, segmentIndex) {
   const summary = summarizeSegments(segments);
-  const summaryId = "900000";
   const progress = chooseSummaryProgressMs(segments, options, segmentIndex);
-  return {
-    id: summaryId,
-    progress,
-    mode: 5,
-    fontsize: SUMMARY_DANMAKU_FONTSIZE,
-    color: 16766720,
-    midHash: "1948dd5d",
-    content: summary.content,
-    ctime: "1735660800",
-    weight: 11,
-    action: `airborne:${progress}`,
-    pool: 0,
-    idStr: summaryId,
-    attr: 1310724,
-    animation: "",
-    extra: "",
-    colorful: 0 /* NONE_TYPE */,
-    type: 1,
-    oid: "212364987",
-    dmFrom: 1
-  };
+  return summary.lines.map((content, index) => {
+    const summaryId = String(900000 + index);
+    return {
+      id: summaryId,
+      progress,
+      mode: 5,
+      fontsize: SUMMARY_DANMAKU_FONTSIZE,
+      color: 16766720,
+      midHash: "1948dd5d",
+      content,
+      ctime: "1735660800",
+      weight: 11,
+      action: `airborne:${progress}`,
+      pool: 0,
+      idStr: summaryId,
+      attr: 1310724,
+      animation: "",
+      extra: "",
+      colorful: 0 /* NONE_TYPE */,
+      type: 1,
+      oid: "212364987",
+      dmFrom: 1
+    };
+  });
 }
 function chooseSummaryProgressMs(segments, options, segmentIndex) {
   const segmentStartMs = getDanmakuSegmentStartMs(segmentIndex);
