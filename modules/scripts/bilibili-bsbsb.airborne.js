@@ -5340,7 +5340,7 @@ function normalizeSponsorBlockOptions(argument) {
     offsetMs: toNumber(argument.offsetMs, 2e3, 0, 1e4),
     maxSegments: Math.round(toNumber(argument.maxSegments, 12, 1, 50)),
     cacheMinutes: toNumber(argument.cacheMinutes, 60, 0, 1440),
-    summaryDanmaku: argument.summaryDanmaku === void 0 ? true : toBoolean(argument.summaryDanmaku),
+    summaryDanmaku: toBoolean(argument.summaryDanmaku),
     summaryDanmakuMs: Math.round(toNumber(argument.summaryDanmakuMs, 3e3, 1e3, 6e4)),
     systemNotification: toBoolean(argument.systemNotification),
     notificationCooldownMinutes: toNumber(argument.notificationCooldownMinutes, 30, 0, 1440),
