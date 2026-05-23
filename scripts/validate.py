@@ -330,11 +330,14 @@ def check_bsbsb_module() -> list[Issue]:
         ("#!name=BilibiliSponsorBlock 空降助手", "module should have a stable human-readable name"),
         ("DOMAIN,bsbsb.top,{{{API策略}}}", "bsbsb.top should be routed by the configurable API policy"),
         (BSBSB_SCRIPT_URL, "module should reference the same-repo airborne script URL"),
-        ("bilibili-bsbsb.airborne.js?v=20260523-request-only-2", "module should cache-bust the request-only script URL after removing the ViewProgress response hook"),
+        ("bilibili-bsbsb.airborne.js?v=20260523-sparkle-chronos-1", "module should cache-bust the airborne script URL after restoring Sparkle Chronos auto-seek"),
         ("DmSegMobile", "module should hook the Bilibili danmaku segment endpoint"),
+        ("bilibili.bsbsb.chronos = type=http-response", "module should restore the known-working Sparkle ViewProgress Chronos hook for auto-seek"),
+        ("bilibili.protobuf.response.js", "auto-seek should use Sparkle's official response script rather than local ViewProgress rewriting"),
+        ("kokoryh/Sparkle", "auto-seek response hook should point at Sparkle's official repository"),
         (BSBSB_SCRIPT_URL, "module should use the same-repo script for danmaku injection"),
         ("grpc.biliapi.net, app.bilibili.com", "MITM scope should stay limited to the two required Bilibili hosts"),
-        ("汇总弹幕:0", "summary danmaku should stay disabled by default until the client-visible injection path is field-validated"),
+        ("汇总弹幕:1", "summary danmaku should stay enabled by default while restoring Sparkle Chronos auto-seek"),
         ("系统通知:0", "system notification should stay opt-in and disabled by default"),
         ("通知冷却分钟:30", "system notification should have a default cooldown"),
         ("汇总弹幕毫秒:3000", "summary danmaku should have a conservative configurable display time"),
@@ -353,17 +356,23 @@ def check_bsbsb_module() -> list[Issue]:
         ("api.live.bilibili.com", "bsbsb-only module should not touch live APIs"),
         ("line3-h5-mobile-api.biligame.com", "bsbsb-only module should not touch Biligame APIs"),
         ("skip-server-cert-verify", "module must not disable certificate verification"),
-        ("type=http-response", "stable module must remain request-only; even a no-op ViewProgress response hook can hide the Bilibili danmaku layer"),
-        ("ViewProgress", "stable module must not intercept ViewProgress; even a no-op response hook can hide the Bilibili danmaku layer"),
-        ("bilibili.bsbsb.chronos", "Chronos auto-seek must not be present in the stable module after field reports broke danmaku"),
-        ("自动跳:#", "auto-seek parameter must not be present in the stable module because the underlying response hook still matches when disabled"),
-        ('"sponsorBlock":"{{{自动跳}}}"', "auto-seek response-hook argument must not be present in the stable module"),
+        ("自动跳:#", "auto-seek should follow the known-working Sparkle hook and not reintroduce a disabled-but-installed parameter gate"),
+        ('"sponsorBlock":"{{{自动跳}}}"', "auto-seek response-hook argument should follow the main helper switch, not a disabled-by-default hook gate"),
+        ("20260523-request-only-2", "module should not keep the old request-only cache-bust after restoring Sparkle Chronos"),
+        ("uiObservation", "stable module must not expose UI observation while restoring Sparkle Chronos"),
+        ("UI观测", "stable module must not expose UI observation while restoring Sparkle Chronos"),
         ("DM\\/DmView", "stable default module must not intercept DmView; even parse/rewrap can hide the Bilibili danmaku layer"),
         ("DM/DmView", "stable default module must not intercept DmView; even parse/rewrap can hide the Bilibili danmaku layer"),
     ]
     for needle, message in forbidden_module_needles:
         if needle in module_script_text:
             issues.append(Issue(BSBSB_MODULE, 1, message))
+    script_lines = [line for line in module_script_text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    chronos_lines = [line for line in script_lines if line.startswith("bilibili.bsbsb.chronos")]
+    if len(chronos_lines) != 1:
+        issues.append(Issue(BSBSB_MODULE, 1, "module should have exactly one Chronos response hook"))
+    elif BSBSB_SCRIPT_URL in chronos_lines[0] or "bilibili-bsbsb.airborne.js" in chronos_lines[0]:
+        issues.append(Issue(BSBSB_MODULE, 1, "Chronos response hook must use Sparkle's official response script, not the local airborne script"))
 
     script_checks = [
         ("parseSurgeArgument", "script should tolerate older backslash-escaped Surge argument JSON instead of repeatedly logging JSON parse errors"),
@@ -385,10 +394,6 @@ def check_bsbsb_module() -> list[Issue]:
         ("maybeNotifySummary", "script should support optional system notification with cooldown"),
         ("notificationCooldownMinutes", "script should rate-limit system notifications"),
         ("ctx2.notify(", "script should use Surge notification API only behind the opt-in notification gate"),
-        ("handleDmViewReply", "script should inspect DmView metadata when UI observation is explicitly enabled"),
-        ("handleViewProgressReply", "script should inspect ViewProgress card resources and patch Chronos in the same response hook"),
-        ("inspectBilibiliUi", "script should log only compact DmView/ViewProgress UI/card metadata instead of dumping whole protobuf bodies"),
-        ("handleChronos", "script should preserve Sparkle Chronos patching when replacing the external response script"),
         ("return []", "script should fail open when bsbsb lookup fails"),
         ("SPDX-License-Identifier: GPL-3.0-or-later", "script should keep GPL SPDX license marker"),
         ("kokoryh/Sparkle", "script should retain Sparkle attribution"),
@@ -465,8 +470,9 @@ def check_bsbsb_module() -> list[Issue]:
         ("空指部已就位", "docs should document the exact skip danmaku content"),
         ("开头汇总弹幕", "docs should document the intro summary danmaku feature"),
         ("系统通知", "docs should document optional system notifications"),
-        ("响应重写已移除", "docs should explain that response rewriting is removed from the stable module"),
-        ("request-only", "docs should document that the stable module is request-only after ViewProgress field failures"),
+        ("Sparkle 官方", "docs should explain that auto-seek uses Sparkle's official ViewProgress response script"),
+        ("不匹配 `DM/DmView`", "docs should state the stable module still avoids DmView response rewriting"),
+        ("默认开启", "docs should document that summary danmaku is enabled by default in the Sparkle Chronos build"),
         ("默认关闭", "docs should state system notification is disabled by default"),
         ("通知冷却", "docs should document notification cooldown behavior"),
         ("GPL-3.0-or-later", "docs should preserve GPL license attribution"),
