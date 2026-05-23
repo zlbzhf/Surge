@@ -329,7 +329,7 @@ def check_bsbsb_module() -> list[Issue]:
         ("#!name=BilibiliSponsorBlock 空降助手", "module should have a stable human-readable name"),
         ("DOMAIN,bsbsb.top,{{{API策略}}}", "bsbsb.top should be routed by the configurable API policy"),
         (BSBSB_SCRIPT_URL, "module should reference the same-repo airborne script URL"),
-        ("bilibili-bsbsb.airborne.js?v=20260523-summary-segment-aware-2", "module should cache-bust the airborne script URL after visibility/debug fixes so Surge does not run a stale 3-second-timeout script"),
+        ("bilibili-bsbsb.airborne.js?v=20260523-summary-beauty-1", "module should cache-bust the airborne script URL after summary visual tuning so Surge does not run a stale oversized summary script"),
         ("DmSegMobile", "module should hook the Bilibili danmaku segment endpoint"),
         ("bilibili.bsbsb.chronos", "module should install the Chronos response hook required for automatic seeking"),
         ("type=http-response", "Chronos hook should run as an HTTP response script"),
@@ -428,6 +428,8 @@ def check_bsbsb_module() -> list[Issue]:
         ("attr: 1310724", "summary danmaku should reuse the known-visible airborne attr"),
         ('extra: ""', "summary danmaku should avoid custom extra metadata that may be filtered by the client"),
         ("chooseSummaryProgressMs(segments, options, segmentIndex)", "summary danmaku should use segment-aware delayed timing instead of a fixed too-early timestamp"),
+        ("SUMMARY_DANMAKU_FONTSIZE = 25", "summary danmaku should use a smaller mobile-friendly font size instead of the large airborne skip font"),
+        ("content: summary.content", "summary danmaku should use compact summary text distinct from exact skip trigger text"),
         ("action: `airborne:${progress}`", "summary danmaku should use a self-target airborne action so Bilibili shows it through the same visible path as working airborne prompts"),
     ]
     for needle, message in summary_field_needles:

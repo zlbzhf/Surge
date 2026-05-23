@@ -4377,6 +4377,7 @@ var CATEGORY_LABELS = {
 var CATEGORY_SHORT_LABELS = {
   sponsor: "广告",
   selfpromo: "推广",
+  selfpromotion: "推广",
   interaction: "互动",
   intro: "片头",
   outro: "片尾",
@@ -4384,6 +4385,7 @@ var CATEGORY_SHORT_LABELS = {
   music_offtopic: "非音乐",
   poi_highlight: "高能"
 };
+var SUMMARY_DANMAKU_FONTSIZE = 25;
 function normalizeSponsorBlockOptions(argument) {
   const categories = new Set(parseList(argument.categories, DEFAULT_CATEGORIES));
   if (toBoolean(argument.includeIntroOutro)) INTRO_OUTRO_CATEGORIES.forEach((category) => categories.add(category));
@@ -4545,20 +4547,20 @@ function summarizeSegments(segments) {
   const categories = [...new Set(segments.map((segment) => segment.category).filter(Boolean))];
   const parts = [];
   if (skipSegments.length) {
-    parts.push(`自动跳过${skipSegments.length}段 / ${formatDuration(skipDurationSeconds)}`);
+    parts.push(`${skipSegments.length}段·${formatDuration(skipDurationSeconds)}`);
   }
   if (poiSegments.length) {
-    parts.push(`高能点${poiSegments.length}个`);
+    parts.push(`高能${poiSegments.length}`);
   }
   if (categories.length) {
-    parts.push(`类型：${categories.map((category) => CATEGORY_SHORT_LABELS[category] || category).slice(0, 4).join("/")}`);
+    parts.push(categories.map((category) => CATEGORY_SHORT_LABELS[category] || category).slice(0, 3).join("/"));
   }
   return {
     skipCount: skipSegments.length,
     poiCount: poiSegments.length,
     skipDurationSeconds,
     categories,
-    content: parts.length ? `小电视空降：${parts.join("，")}` : "",
+    content: parts.length ? `空降 ${parts.join(" · ")}` : "",
     signature: [skipSegments.length, skipDurationSeconds, poiSegments.length, categories.join("|")].join(":")
   };
 }
@@ -4605,7 +4607,7 @@ function createSummaryDanmaku(segments, options, segmentIndex) {
     id: summaryId,
     progress,
     mode: 5,
-    fontsize: 50,
+    fontsize: SUMMARY_DANMAKU_FONTSIZE,
     color: 16766720,
     midHash: "1948dd5d",
     content: summary.content,

@@ -978,3 +978,41 @@ diff --git a/modules/bilibili-bsbsb.sgmodule b/modules/bilibili-bsbsb.sgmodule
 @@
 -script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js
 +script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js?v=20260523-summary-segment-aware-2
+
+
+# Incremental fix: compact mobile-friendly summary danmaku
+# Rationale: the summary card is visible, but the previous summary reused the large skip-card font (50) and verbose copy, which can overflow small iPhone screens. Keep normal airborne skip cards unchanged, but make the summary card smaller and shorter.
+diff --git a/modules/scripts/bilibili-bsbsb.airborne.js b/modules/scripts/bilibili-bsbsb.airborne.js
+--- a/modules/scripts/bilibili-bsbsb.airborne.js
++++ b/modules/scripts/bilibili-bsbsb.airborne.js
+@@
+ var CATEGORY_SHORT_LABELS = {
+   sponsor: "广告",
+   selfpromo: "推广",
++  selfpromotion: "推广",
+   interaction: "互动",
+@@
+   poi_highlight: "高能"
+ };
++var SUMMARY_DANMAKU_FONTSIZE = 25;
+@@
+-    parts.push(`自动跳过${skipSegments.length}段 / ${formatDuration(skipDurationSeconds)}`);
++    parts.push(`${skipSegments.length}段·${formatDuration(skipDurationSeconds)}`);
+@@
+-    parts.push(`高能点${poiSegments.length}个`);
++    parts.push(`高能${poiSegments.length}`);
+@@
+-    parts.push(`类型：${categories.map((category) => CATEGORY_SHORT_LABELS[category] || category).slice(0, 4).join("/")}`);
++    parts.push(categories.map((category) => CATEGORY_SHORT_LABELS[category] || category).slice(0, 3).join("/"));
+@@
+-    content: parts.length ? `小电视空降：${parts.join("，")}` : "",
++    content: parts.length ? `空降 ${parts.join(" · ")}` : "",
+@@
+-    fontsize: 50,
++    fontsize: SUMMARY_DANMAKU_FONTSIZE,
+diff --git a/modules/bilibili-bsbsb.sgmodule b/modules/bilibili-bsbsb.sgmodule
+--- a/modules/bilibili-bsbsb.sgmodule
++++ b/modules/bilibili-bsbsb.sgmodule
+@@
+-script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js?v=20260523-summary-segment-aware-2
++script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js?v=20260523-summary-beauty-1
