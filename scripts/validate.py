@@ -7,6 +7,7 @@ Checks are intentionally practical for a public daily-driver config:
 - proxy groups do not reference missing or stale/unused policy groups;
 - rule ordering preserves domainset -> non_ip -> ip -> FINAL;
 - generated blackmatrix7 split rules are referenced instead of mixed upstream lists;
+- optional modules stay minimal, documented, and do not broaden MITM/script scope;
 - high-risk public-profile settings and obvious secrets are not active.
 """
 from __future__ import annotations
@@ -27,6 +28,12 @@ from generate import load_sources  # noqa: E402
 CONFIG_FILES = [ROOT / "Surge.conf"]
 BUILTIN_POLICIES = {"DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP"}
 BLACKMATRIX7_MIXED_PREFIX = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Surge/"
+BSBSB_MODULE = ROOT / "modules" / "bilibili-bsbsb.sgmodule"
+BSBSB_SCRIPT = ROOT / "modules" / "scripts" / "bilibili-bsbsb.airborne.js"
+BSBSB_DOC = ROOT / "docs" / "modules" / "bilibili-bsbsb.md"
+BSBSB_PATCH = ROOT / "docs" / "modules" / "bilibili-bsbsb-sparkle.patch"
+GPL_LICENSE = ROOT / "modules" / "LICENSES" / "GPL-3.0.txt"
+BSBSB_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js"
 FORBIDDEN_ACTIVE_GROUPS = {
     "BiliBili": "BiliBili should stay handled by SukkaW domestic/stream rules, not as an independent active policy group",
 }
@@ -298,6 +305,84 @@ def check_security(path: Path, text: str) -> list[Issue]:
     return issues
 
 
+def check_bsbsb_module() -> list[Issue]:
+    """Validate the optional BilibiliSponsorBlock Surge module stays minimal and safe."""
+    issues: list[Issue] = []
+    required_files = [BSBSB_MODULE, BSBSB_SCRIPT, BSBSB_DOC, BSBSB_PATCH, GPL_LICENSE]
+    for path in required_files:
+        if not path.exists():
+            issues.append(Issue(path, 1, "missing BilibiliSponsorBlock optional module artifact"))
+    if issues:
+        return issues
+
+    module_text = BSBSB_MODULE.read_text(encoding="utf-8")
+    script_text = BSBSB_SCRIPT.read_text(encoding="utf-8")
+    doc_text = BSBSB_DOC.read_text(encoding="utf-8")
+
+    module_checks = [
+        ("#!name=BilibiliSponsorBlock 空降助手", "module should have a stable human-readable name"),
+        ("DOMAIN,bsbsb.top,{{{API策略}}}", "bsbsb.top should be routed by the configurable API policy"),
+        (BSBSB_SCRIPT_URL, "module should reference the same-repo airborne script URL"),
+        ("DmSegMobile", "module should only hook the Bilibili danmaku segment endpoint"),
+        ("grpc.biliapi.net, app.bilibili.com", "MITM scope should stay limited to the two required Bilibili hosts"),
+    ]
+    for needle, message in module_checks:
+        if needle not in module_text:
+            issues.append(Issue(BSBSB_MODULE, 1, message))
+    forbidden_module_needles = [
+        ("hostname = *", "module must not MITM all hostnames"),
+        ("api.bilibili.com", "bsbsb-only module should not MITM broad Bilibili REST hosts"),
+        ("api.live.bilibili.com", "bsbsb-only module should not touch live APIs"),
+        ("line3-h5-mobile-api.biligame.com", "bsbsb-only module should not touch Biligame APIs"),
+        ("skip-server-cert-verify", "module must not disable certificate verification"),
+    ]
+    for needle, message in forbidden_module_needles:
+        if needle in module_text:
+            issues.append(Issue(BSBSB_MODULE, 1, message))
+
+    script_checks = [
+        ("bsbsb.top/api/skipSegments", "script should fetch BilibiliSponsorBlock skipSegments API"),
+        ("categories=", "script should support multi-category queries instead of sponsor-only mode"),
+        ("User-Agent", "script should set a browser-like User-Agent for bsbsb Cloudflare compatibility"),
+        ("x-ext-version", "script should send the BilibiliSponsorBlock version header"),
+        ("$persistentStore", "script should cache bsbsb responses in Surge persistent storage"),
+        ("mergeGap", "script should merge near-overlapping segments"),
+        ("minDuration", "script should filter very short segments"),
+        ("poi_highlight", "script should expose optional highlight/POI support"),
+        ("return []", "script should fail open when bsbsb lookup fails"),
+        ("SPDX-License-Identifier: GPL-3.0-or-later", "script should keep GPL SPDX license marker"),
+        ("kokoryh/Sparkle", "script should retain Sparkle attribution"),
+        ("hanydd/BilibiliSponsorBlock", "script should retain BilibiliSponsorBlock attribution"),
+    ]
+    for needle, message in script_checks:
+        if needle not in script_text:
+            issues.append(Issue(BSBSB_SCRIPT, 1, message))
+    forbidden_script_needles = [
+        ("voteOnSponsorTime", "script must not vote using user identity"),
+        ("viewedVideoSponsorTime", "script must not report viewing activity"),
+        ("userID", "script must not embed or request a private bsbsb user ID"),
+        ("category=sponsor", "script should not hard-code sponsor-only mode"),
+    ]
+    for needle, message in forbidden_script_needles:
+        if needle in script_text:
+            issues.append(Issue(BSBSB_SCRIPT, 1, message))
+
+    doc_checks = [
+        ("MITM", "docs should disclose MITM requirement"),
+        ("bsbsb.top", "docs should name the external API/data source"),
+        ("sponsor|selfpromo|interaction", "docs should document the default category set"),
+        ("不进主 Surge.conf", "docs should state this remains optional, not default"),
+        ("GPL-3.0-or-later", "docs should preserve GPL license attribution"),
+        ("kokoryh/Sparkle", "docs should attribute Sparkle"),
+        ("hanydd/BilibiliSponsorBlock", "docs should attribute BilibiliSponsorBlock"),
+    ]
+    for needle, message in doc_checks:
+        if needle not in doc_text:
+            issues.append(Issue(BSBSB_DOC, 1, message))
+
+    return issues
+
+
 def validate(skip_network: bool = False) -> int:
     issues: list[Issue] = []
     for path in CONFIG_FILES:
@@ -308,6 +393,7 @@ def validate(skip_network: bool = False) -> int:
         issues.extend(check_blackmatrix7_split(path, text, rules))
         issues.extend(check_security(path, text))
         issues.extend(check_urls(path, rules, skip_network=skip_network))
+    issues.extend(check_bsbsb_module())
 
     if issues:
         for issue in issues:

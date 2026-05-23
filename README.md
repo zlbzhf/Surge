@@ -25,6 +25,7 @@ blackmatrix7 单 App 精细控制
 - `docs/private-nodes.md` — 私有节点配置与更新保留方案。
 - `docs/sub-store.md` — Sub-Store 节点治理建议。
 - `docs/optional-modules.md` — 可选模块和风险分层原则。
+- `modules/` — 不进入主配置默认启用的 optional modules。
 
 ## 设计
 
@@ -64,6 +65,15 @@ BiliBili 不使用大而全单 App 规则前置，保留 SukkaW 的分布式处�
 
 你需要在 Surge 本地准备 `proxies.txt`，内容是你的节点列表或完整 Surge 节点订阅。详见 [私有节点配置](docs/private-nodes.md)。不要把真实订阅链接、节点密码或 `proxies.txt` 提交到公开仓库。
 
+## Optional Modules
+
+当前托管：
+
+- [BilibiliSponsorBlock 空降助手](docs/modules/bilibili-bsbsb.md)
+  - 模块 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule`
+  - 只做 bsbsb.top 空降点注入，不做 B 站去广告/皮肤/直播/账号改写。
+  - 需要 MITM，仅追加 `grpc.biliapi.net, app.bilibili.com`。
+
 ## 生成
 
 ```bash
@@ -92,6 +102,7 @@ python3 scripts/validate.py
 - blackmatrix7 是否已拆分为本地 `non_ip` / `ip` 列表。
 - 是否误提交订阅链接、MITM CA、代理凭据等敏感内容。
 - 是否默认开启高风险网络设置。
+- optional module 是否保持最小 MITM 范围、同仓库脚本 URL、bsbsb 失败开放和必要 attribution。
 
 ## 文档
 
@@ -99,3 +110,4 @@ python3 scripts/validate.py
 - [私有节点配置](docs/private-nodes.md)
 - [Sub-Store 节点治理建议](docs/sub-store.md)
 - [Optional Modules 原则](docs/optional-modules.md)
+- [BilibiliSponsorBlock 空降助手](docs/modules/bilibili-bsbsb.md)

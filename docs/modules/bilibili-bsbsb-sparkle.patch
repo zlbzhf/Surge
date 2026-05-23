@@ -1,0 +1,351 @@
+diff --git a/src/script/bilibili/protobuf/handler.ts b/src/script/bilibili/protobuf/handler.ts
+index 4e9ba08..74da6e5 100644
+--- a/src/script/bilibili/protobuf/handler.ts
++++ b/src/script/bilibili/protobuf/handler.ts
+@@ -305,13 +305,14 @@ export const handleDmSegMobileReq: Middleware = async (ctx, next) => {
+     const videoId = toBvid(pid);
+     const [{ headers, bodyBytes, h2_trailers }, segments] = await Promise.all([
+         fetchBilibili(ctx, 1),
+-        fetchSponsorBlock(videoId, oid),
++        fetchSponsorBlock(ctx, videoId, oid),
+     ]);
+     ctx.response.headers = headers;
+     ctx.response.bodyBytes = bodyBytes;
+     ctx.response.h2_trailers = h2_trailers;
+     if (segments.length) {
+         ctx.state.segments = segments;
++        ctx.state.sponsorBlockOptions = normalizeSponsorBlockOptions(ctx.argument as Argument);
+         return next();
+     }
+ };
+@@ -321,7 +322,7 @@ async function fetchBilibili(ctx: Context, maxRetries = 2) {
+     const url = new URL(sourceUrl);
+     const hosts = ['grpc.biliapi.net', 'app.bilibili.com'];
+ 
+-    const startIndex = hosts.indexOf(url.hostname);
++    const startIndex = Math.max(0, hosts.indexOf(url.hostname));
+     const endIndex = Math.min(startIndex + maxRetries, hosts.length);
+ 
+     for (let i = startIndex; i < endIndex; i++) {
+@@ -357,17 +358,101 @@ async function fetchBilibili(ctx: Context, maxRetries = 2) {
+     exit(1);
+ }
+ 
+-async function fetchSponsorBlock(videoId: string, cid: string): Promise<number[][]> {
++interface SponsorBlockOptions {
++    categories: string[];
++    actionTypes: string[];
++    minDuration: number;
++    mergeGap: number;
++    offsetMs: number;
++    maxSegments: number;
++    cacheMinutes: number;
++    userAgent: string;
++}
++
++interface AirborneSegment {
++    start: number;
++    end: number;
++    category: string;
++    actionType: string;
++    UUID?: string;
++}
++
++const DEFAULT_CATEGORIES = ['sponsor', 'selfpromo', 'interaction'];
++const INTRO_OUTRO_CATEGORIES = ['intro', 'outro', 'padding', 'music_offtopic'];
++const POI_CATEGORIES = ['poi_highlight'];
++const DEFAULT_USER_AGENT =
++    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 BilibiliSponsorBlock-Surge/1.0';
++const CATEGORY_LABELS: Record<string, string> = {
++    sponsor: '恰饭广告已标记',
++    selfpromo: '推广片段已标记',
++    interaction: '互动提醒已标记',
++    intro: '片头可跳过',
++    outro: '片尾可跳过',
++    padding: '空白段落可跳过',
++    music_offtopic: '非音乐段落可跳过',
++    poi_highlight: '高能点已标记',
++};
++
++function normalizeSponsorBlockOptions(argument: Partial<Argument>): SponsorBlockOptions {
++    const categories = new Set(parseList(argument.categories, DEFAULT_CATEGORIES));
++    if (toBoolean(argument.includeIntroOutro)) INTRO_OUTRO_CATEGORIES.forEach(category => categories.add(category));
++    if (toBoolean(argument.includePoiHighlight)) POI_CATEGORIES.forEach(category => categories.add(category));
++
++    const actionTypes = new Set(parseList(argument.actionTypes, ['skip']));
++    if (toBoolean(argument.includePoiHighlight)) actionTypes.add('poi');
++
++    return {
++        categories: [...categories],
++        actionTypes: [...actionTypes],
++        minDuration: toNumber(argument.minDuration, 5, 0, 120),
++        mergeGap: toNumber(argument.mergeGap, 1.5, 0, 30),
++        offsetMs: toNumber(argument.offsetMs, 2000, 0, 10000),
++        maxSegments: Math.round(toNumber(argument.maxSegments, 12, 1, 50)),
++        cacheMinutes: toNumber(argument.cacheMinutes, 60, 0, 1440),
++        userAgent: argument.userAgent || DEFAULT_USER_AGENT,
++    };
++}
++
++function parseList(value: unknown, fallback: string[]): string[] {
++    if (typeof value !== 'string' || !value.trim()) return fallback;
++    const parsed = value
++        .split(/[|,\s]+/)
++        .map(item => item.trim())
++        .filter(Boolean);
++    return parsed.length ? parsed : fallback;
++}
++
++function toBoolean(value: unknown): boolean {
++    if (typeof value === 'boolean') return value;
++    if (typeof value === 'number') return value !== 0;
++    if (typeof value === 'string') return ['1', 'true', 'yes', 'on', '开启', '启用'].includes(value.toLowerCase());
++    return false;
++}
++
++function toNumber(value: unknown, fallback: number, min: number, max: number): number {
++    const parsed = Number(value);
++    if (!Number.isFinite(parsed)) return fallback;
++    return Math.min(max, Math.max(min, parsed));
++}
++
++async function fetchSponsorBlock(ctx: Context, videoId: string, cid: string): Promise<AirborneSegment[]> {
++    const options = normalizeSponsorBlockOptions(ctx.argument as Argument);
++    const cacheKey = buildCacheKey(videoId, cid, options);
++    const cached = readCachedSegments(ctx, cacheKey, options.cacheMinutes);
++    if (cached) return cached;
++
+     try {
+-        const { status, body } = await getSkipSegments(videoId, cid);
++        const { status, body } = await getSkipSegments(videoId, cid, options);
+ 
+-        Logger.debug('[SponsorBlock]', { videoId, status, body });
++        Logger.debug('[SponsorBlock]', { videoId, cid, status, categories: options.categories, actionTypes: options.actionTypes });
+ 
+         if (status !== 200 || !body || body === '[]') {
+             return [];
+         }
+ 
+-        return parseSegments(body);
++        const segments = parseSegments(body, options);
++        writeCachedSegments(ctx, cacheKey, segments, options.cacheMinutes);
++        return segments;
+     } catch (e) {
+         Logger.info('[SponsorBlock]', e);
+ 
+@@ -375,44 +460,115 @@ async function fetchSponsorBlock(videoId: string, cid: string): Promise<number[]
+     }
+ }
+ 
+-function parseSegments(body: string): number[][] {
+-    return (JSON.parse(body) as SegmentItem[]).reduce((memo: number[][], { actionType, segment }) => {
+-        if (actionType === 'skip' && segment[1] - segment[0] >= 8) {
+-            memo.push(segment);
++function buildCacheKey(videoId: string, cid: string, options: SponsorBlockOptions): string {
++    return [
++        'bsbsb.airborne.v1',
++        videoId,
++        cid,
++        options.categories.join('|'),
++        options.actionTypes.join('|'),
++        options.minDuration,
++        options.mergeGap,
++    ].join(':');
++}
++
++function readCachedSegments(ctx: Context, cacheKey: string, cacheMinutes: number): AirborneSegment[] | null {
++    if (cacheMinutes <= 0) return null;
++    try {
++        const cached = ctx.getJSON(cacheKey) as { createdAt?: number; segments?: AirborneSegment[] } | null;
++        if (!cached?.createdAt || !Array.isArray(cached.segments)) return null;
++        if (Date.now() - cached.createdAt > cacheMinutes * 60 * 1000) return null;
++        return cached.segments;
++    } catch {
++        return null;
++    }
++}
++
++function writeCachedSegments(ctx: Context, cacheKey: string, segments: AirborneSegment[], cacheMinutes: number): void {
++    if (cacheMinutes <= 0) return;
++    try {
++        ctx.setJSON({ createdAt: Date.now(), segments }, cacheKey);
++    } catch (e) {
++        Logger.debug('[SponsorBlock] cache write failed', e);
++    }
++}
++
++function parseSegments(body: string, options: SponsorBlockOptions): AirborneSegment[] {
++    const categories = new Set(options.categories);
++    const actionTypes = new Set(options.actionTypes);
++    const parsed = (JSON.parse(body) as SegmentItem[]).reduce((memo: AirborneSegment[], item) => {
++        const segment = item.segment;
++        if (!Array.isArray(segment) || segment.length < 2) return memo;
++        const start = Number(segment[0]);
++        const end = Number(segment[1]);
++        if (!Number.isFinite(start) || !Number.isFinite(end)) return memo;
++        if (!categories.has(item.category) || !actionTypes.has(item.actionType)) return memo;
++
++        if (item.actionType === 'poi') {
++            memo.push({ start, end: start, category: item.category, actionType: item.actionType, UUID: item.UUID });
++            return memo;
+         }
++
++        if (end <= start || end - start < options.minDuration) return memo;
++        memo.push({ start, end, category: item.category, actionType: item.actionType, UUID: item.UUID });
+         return memo;
+     }, []);
++
++    return mergeSegments(parsed, options).slice(0, options.maxSegments);
++}
++
++function mergeSegments(segments: AirborneSegment[], options: SponsorBlockOptions): AirborneSegment[] {
++    const skipSegments = segments
++        .filter(segment => segment.actionType === 'skip')
++        .sort((left, right) => left.start - right.start);
++    const merged: AirborneSegment[] = [];
++    for (const segment of skipSegments) {
++        const last = merged.at(-1);
++        if (last && segment.start <= last.end + options.mergeGap) {
++            last.end = Math.max(last.end, segment.end);
++            if (last.category !== segment.category) last.category = 'sponsor';
++            continue;
++        }
++        merged.push({ ...segment });
++    }
++
++    return [
++        ...merged,
++        ...segments.filter(segment => segment.actionType !== 'skip'),
++    ].sort((left, right) => left.start - right.start);
+ }
+ 
+ export const handleDmSegMobileReply: Middleware = (ctx, next) => {
+     const message = DmSegMobileReply.fromBinary(ctx.response.bodyBytes);
+-    message.elems.push(...createAirborneDanmaku(ctx.state.segments));
++    message.elems.push(...createAirborneDanmaku(ctx.state.segments, ctx.state.sponsorBlockOptions));
+     ctx.response.bodyBytes = DmSegMobileReply.toBinary(message);
+     return next();
+ };
+ 
+-function createAirborneDanmaku(segments: number[][]): DanmakuElem[] {
+-    const offset = 2000;
++function createAirborneDanmaku(segments: AirborneSegment[], options: SponsorBlockOptions): DanmakuElem[] {
+     return segments.map((segment, index) => {
+         const id = String(index + 1);
+-        const start = Math.floor(segment[0] * 1000) + offset;
+-        const end = Math.floor(segment[1] * 1000);
++        const target = Math.floor(segment.end * 1000);
++        const progress =
++            segment.actionType === 'poi'
++                ? Math.max(0, Math.floor(segment.start * 1000) - options.offsetMs)
++                : Math.floor(segment.start * 1000) + options.offsetMs;
+         return {
+             id,
+-            progress: start,
++            progress,
+             mode: 5,
+             fontsize: 50,
+             color: 16777215,
+             midHash: '1948dd5d',
+-            content: '空指部已就位',
++            content: `空指部已就位 · ${CATEGORY_LABELS[segment.category] || '片段已标记'}`,
+             ctime: '1735660800',
+             weight: 11,
+-            action: `airborne:${end}`,
++            action: `airborne:${target}`,
+             pool: 0,
+             idStr: id,
+             attr: 1310724,
+             animation: '',
+-            extra: '',
++            extra: JSON.stringify({ category: segment.category, actionType: segment.actionType, UUID: segment.UUID || '' }),
+             colorful: DmColorfulType.NONE_TYPE,
+             type: 1,
+             oid: '212364987',
+diff --git a/src/script/bilibili/protobuf/middleware.ts b/src/script/bilibili/protobuf/middleware.ts
+index 1499fce..975d50a 100644
+--- a/src/script/bilibili/protobuf/middleware.ts
++++ b/src/script/bilibili/protobuf/middleware.ts
+@@ -5,12 +5,33 @@ export interface Argument {
+     displayUpList: 'auto' | 'show' | 'hide';
+     purifyComment: boolean | number;
+     sponsorBlock: boolean | string;
++    categories: string;
++    actionTypes: string;
++    includeIntroOutro: boolean | number | string;
++    includePoiHighlight: boolean | number | string;
++    minDuration: number | string;
++    mergeGap: number | string;
++    offsetMs: number | string;
++    maxSegments: number | string;
++    cacheMinutes: number | string;
++    userAgent: string;
+ }
+ 
+ export const initArgument: Middleware = createInitArgumentMiddleware<Argument>({
+     displayUpList: 'show',
+     purifyComment: true,
+     sponsorBlock: true,
++    categories: 'sponsor|selfpromo|interaction',
++    actionTypes: 'skip',
++    includeIntroOutro: false,
++    includePoiHighlight: false,
++    minDuration: 5,
++    mergeGap: 1.5,
++    offsetMs: 2000,
++    maxSegments: 12,
++    cacheMinutes: 60,
++    userAgent:
++        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 BilibiliSponsorBlock-Surge/1.0',
+ });
+ 
+ export const handleResponseHeaders: Middleware = (ctx, next) => {
+diff --git a/src/service/sponsor-block.service.ts b/src/service/sponsor-block.service.ts
+index 94412e2..d5f303d 100644
+--- a/src/service/sponsor-block.service.ts
++++ b/src/service/sponsor-block.service.ts
+@@ -13,15 +13,39 @@ export interface SegmentItem {
+     description: string;
+ }
+ 
+-export function getSkipSegments(videoId: string, cid = ''): Promise<FetchResponse> {
++export interface SponsorBlockRequestOptions {
++    categories: string[];
++    actionTypes: string[];
++    userAgent?: string;
++}
++
++function encodeJsonList(values: string[]): string {
++    return encodeURIComponent(JSON.stringify(values));
++}
++
++export function getSkipSegments(
++    videoId: string,
++    cid = '',
++    options: SponsorBlockRequestOptions = { categories: ['sponsor'], actionTypes: ['skip'] }
++): Promise<FetchResponse> {
+     cid = cid !== '0' ? cid : '';
++    const query = [
++        `videoID=${encodeURIComponent(videoId)}`,
++        `cid=${encodeURIComponent(cid)}`,
++        `categories=${encodeJsonList(options.categories)}`,
++        `actionTypes=${encodeJsonList(options.actionTypes)}`,
++    ].join('&');
++
+     return ctx.fetch({
+         method: 'get',
+-        url: `https://bsbsb.top/api/skipSegments?videoID=${videoId}&cid=${cid}&category=sponsor`,
++        url: `https://bsbsb.top/api/skipSegments?${query}`,
+         headers: {
+-            origin: 'https://github.com/kokoryh/Sparkle/blob/master/release/surge/module/bilibili.sgmodule',
+-            'x-ext-version': '1.0.0',
++            origin: 'chrome-extension://eaoelafamejbnggahofapllmfhlhajdd',
++            'x-ext-version': '0.5.0',
++            'User-Agent':
++                options.userAgent ||
++                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 BilibiliSponsorBlock-Surge/1.0',
+         },
+-        timeout: 3, // no more than 3 seconds
++        timeout: 3, // fail open quickly; never block Bilibili playback for bsbsb lookup
+     });
+ }

@@ -99,21 +99,30 @@
 
 ### BiliBili 增强
 
+当前仓库托管：
+
+- `modules/bilibili-bsbsb.sgmodule` — BilibiliSponsorBlock 空降助手。
+
 参考：
 
 - BiliUniverse/Enhanced
+- kokoryh/Sparkle
+- hanydd/BilibiliSponsorBlock / bsbsb.top
 
 可用于：
 
 - BiliBili App UI 调整
 - 功能增强
 - 广告/推荐位处理
+- 空降助手/高能点提示
 
 建议：
 
 - 不改变主配置的 BiliBili 分流逻辑。
 - 国内 B 站主站仍优先 DIRECT。
 - 增强模块仅在用户明确需要时启用。
+- BilibiliSponsorBlock 空降助手只做 bsbsb.top 片段注入，不混入去广告、直播、皮肤或账号相关改写。
+- BilibiliSponsorBlock 模块 MITM 范围必须保持最小化：`grpc.biliapi.net, app.bilibili.com`。
 
 ### 中文广告增强
 
@@ -138,13 +147,18 @@
 ```text
 modules/
   README.md
-  adblock-optional.md
-  apple-irongo-optional.md
-  bilibili-optional.md
-  app-rewrite-optional.md
+  bilibili-bsbsb.sgmodule
+  scripts/
+    bilibili-bsbsb.airborne.js
+  LICENSES/
+    GPL-3.0.txt
+
+docs/modules/
+  bilibili-bsbsb.md
+  bilibili-bsbsb-sparkle.patch
 ```
 
-当前阶段先用文档记录原则，不直接托管高风险模块。
+高风险模块可以托管，但必须单独文档化风险、hostname、脚本来源、协议和校验规则；不得进入主 `Surge.conf` 默认启用。
 
 ## 主配置禁止项
 
