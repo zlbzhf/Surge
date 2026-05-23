@@ -411,6 +411,22 @@ def check_bsbsb_module() -> list[Issue]:
         ("injectExperimentalCommandDm", "DmView CommandDm injection broke the Bilibili danmaku layer in field testing; keep this experiment disabled/removed"),
         ("commandDmExperiment", "module must not expose the broken DmView CommandDm injection experiment"),
         ("DmView:commandDmExperiment", "script must not run the broken DmView CommandDm injection experiment"),
+        ("handleDmViewReply", "MVP airborne script must not keep local DmView parsing/rewrap handlers"),
+        ("handleViewProgressReply", "MVP airborne script must not keep local ViewProgress/Chronos response rewriting"),
+        ("handleChronos", "auto-seek should stay in Sparkle's official response script, not local airborne.js"),
+        ("handleViewReply", "bsbsb-only MVP script must not keep Bilibili View ad/panel cleanup handlers"),
+        ("handleMainListReply", "bsbsb-only MVP script must not keep comment/reply cleanup handlers"),
+        ('router.post("v1.DM/DmView"', "MVP airborne router should only handle DmSegMobile"),
+        ('router.post("view.v1.View/ViewProgress"', "MVP airborne router should not handle local ViewProgress"),
+        ('router.post("viewunite.v1.View/ViewProgress"', "MVP airborne router should not handle local ViewProgress"),
+        ('router.post("viewunite.v1.View/View"', "MVP airborne router should not handle Bilibili View cleanup"),
+        ('router.post("v1.Reply/MainList"', "MVP airborne router should not handle reply/comment cleanup"),
+        ("uiObservation", "MVP airborne script must not keep local UI observation toggles"),
+        ("purifyComment", "MVP airborne script must not keep comment purification toggles"),
+        ("displayUpList", "MVP airborne script must not keep unrelated Sparkle display options"),
+        ("app/viewunite/v1/view.ts", "MVP airborne script must not keep unrelated View protobuf enums"),
+        ("ModuleType", "MVP airborne script must not keep unrelated View module enums"),
+        ("RelateCardType", "MVP airborne script must not keep unrelated related-card enums"),
     ]
     for needle, message in forbidden_script_needles:
         if needle in script_text:

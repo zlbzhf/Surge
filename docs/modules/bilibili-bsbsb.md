@@ -4,7 +4,7 @@
 
 - 模块：`modules/bilibili-bsbsb.sgmodule`
 - 脚本：`modules/scripts/bilibili-bsbsb.airborne.js`；自动跳使用 Sparkle 官方 `bilibili.protobuf.response.js`
-- 当前默认路径包含 `DmSegMobile` 请求脚本和 Sparkle 原版 `ViewProgress` response hook：前者注入空降/汇总弹幕，后者替换 Chronos 实现自动跳。仍不匹配 `DmView`，也不使用本地 `handleChronos` / UI 观测逻辑。
+- 当前默认路径包含 `DmSegMobile` 请求脚本和 Sparkle 原版 `ViewProgress` response hook：前者只负责 bsbsb 空降/汇总弹幕注入，后者替换 Chronos 实现自动跳。本地脚本已瘦身为 DmSegMobile-only MVP，不匹配也不保留 `DmView`、本地 `handleChronos` / UI 观测、B 站去广告或评论净化逻辑。
 - 导入 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule`
 
 ## 定位
