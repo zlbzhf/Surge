@@ -1,0 +1,30 @@
+name: Validate Surge Config
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly external-source drift check.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Check generated files
+        run: python3 scripts/generate.py --check
+
+      - name: Validate profiles
+        run: python3 scripts/validate.py

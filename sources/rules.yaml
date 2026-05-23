@@ -1,0 +1,52 @@
+repository:
+  owner: zlbzhf
+  name: Surge
+  branch: main
+  local_raw_base: https://raw.githubusercontent.com/zlbzhf/Surge/main
+
+blackmatrix7:
+  base_url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Surge
+  apps:
+    - name: PayPal
+      policy: PayPal
+      path: PayPal/PayPal.list
+    - name: GitHub
+      policy: GitHub
+      path: GitHub/GitHub.list
+    - name: YouTube
+      policy: YouTube
+      path: YouTube/YouTube.list
+    - name: Netflix
+      policy: Netflix
+      path: Netflix/Netflix.list
+    - name: Disney
+      policy: Disney+
+      path: Disney/Disney.list
+    - name: Spotify
+      policy: Spotify
+      path: Spotify/Spotify.list
+    - name: TikTok
+      policy: TikTok
+      path: TikTok/TikTok.list
+
+# Optional candidates are intentionally documented but not generated into the main profile.
+# Add an item to blackmatrix7.apps only when there is a functional reason for an independent policy:
+# regional library, IP reputation/residential need, account-risk isolation, or developer workflow stability.
+optional_candidates:
+  media:
+    - Hulu
+    - HBO
+    - AmazonPrimeVideo
+    - PrimeVideo
+    - AbemaTV
+    - Bahamut
+  developer:
+    - GitLab
+    - Docker
+    - HuggingFace
+  platforms:
+    - Google
+    - Steam
+    - Epic
+    - Sony
+    - Nintendo
