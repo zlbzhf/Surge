@@ -4542,7 +4542,7 @@ var handleDmSegMobileReply = (ctx2, next) => {
   const options = ctx2.state.sponsorBlockOptions;
   const segments = ctx2.state.segments;
   if (ctx2.state.includeSummaryDanmaku) {
-    message.elems.push(createSummaryDanmaku(segments, options));
+    message.elems.unshift(createSummaryDanmaku(segments, options));
   }
   message.elems.push(...createAirborneDanmaku(segments, options));
   ctx2.response.bodyBytes = DmSegMobileReply.toBinary(message);

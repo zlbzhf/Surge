@@ -21,16 +21,16 @@ index 4e9ba08..74da6e5 100644
 @@ -321,7 +322,7 @@ async function fetchBilibili(ctx: Context, maxRetries = 2) {
      const url = new URL(sourceUrl);
      const hosts = ['grpc.biliapi.net', 'app.bilibili.com'];
- 
+
 -    const startIndex = hosts.indexOf(url.hostname);
 +    const startIndex = Math.max(0, hosts.indexOf(url.hostname));
      const endIndex = Math.min(startIndex + maxRetries, hosts.length);
- 
+
      for (let i = startIndex; i < endIndex; i++) {
 @@ -357,17 +358,101 @@ async function fetchBilibili(ctx: Context, maxRetries = 2) {
      exit(1);
  }
- 
+
 -async function fetchSponsorBlock(videoId: string, cid: string): Promise<number[][]> {
 +interface SponsorBlockOptions {
 +    categories: string[];
@@ -118,25 +118,25 @@ index 4e9ba08..74da6e5 100644
      try {
 -        const { status, body } = await getSkipSegments(videoId, cid);
 +        const { status, body } = await getSkipSegments(videoId, cid, options);
- 
+
 -        Logger.debug('[SponsorBlock]', { videoId, status, body });
 +        Logger.debug('[SponsorBlock]', { videoId, cid, status, categories: options.categories, actionTypes: options.actionTypes });
- 
+
          if (status !== 200 || !body || body === '[]') {
              return [];
          }
- 
+
 -        return parseSegments(body);
 +        const segments = parseSegments(body, options);
 +        writeCachedSegments(ctx, cacheKey, segments, options.cacheMinutes);
 +        return segments;
      } catch (e) {
          Logger.info('[SponsorBlock]', e);
- 
+
 @@ -375,44 +460,115 @@ async function fetchSponsorBlock(videoId: string, cid: string): Promise<number[]
      }
  }
- 
+
 -function parseSegments(body: string): number[][] {
 -    return (JSON.parse(body) as SegmentItem[]).reduce((memo: number[][], { actionType, segment }) => {
 -        if (actionType === 'skip' && segment[1] - segment[0] >= 8) {
@@ -218,7 +218,7 @@ index 4e9ba08..74da6e5 100644
 +        ...segments.filter(segment => segment.actionType !== 'skip'),
 +    ].sort((left, right) => left.start - right.start);
  }
- 
+
  export const handleDmSegMobileReply: Middleware = (ctx, next) => {
      const message = DmSegMobileReply.fromBinary(ctx.response.bodyBytes);
 -    message.elems.push(...createAirborneDanmaku(ctx.state.segments));
@@ -226,7 +226,7 @@ index 4e9ba08..74da6e5 100644
      ctx.response.bodyBytes = DmSegMobileReply.toBinary(message);
      return next();
  };
- 
+
 -function createAirborneDanmaku(segments: number[][]): DanmakuElem[] {
 -    const offset = 2000;
 +function createAirborneDanmaku(segments: AirborneSegment[], options: SponsorBlockOptions): DanmakuElem[] {
@@ -283,7 +283,7 @@ index 1499fce..975d50a 100644
 +    cacheMinutes: number | string;
 +    userAgent: string;
  }
- 
+
  export const initArgument: Middleware = createInitArgumentMiddleware<Argument>({
      displayUpList: 'show',
      purifyComment: true,
@@ -300,7 +300,7 @@ index 1499fce..975d50a 100644
 +    userAgent:
 +        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 BilibiliSponsorBlock-Surge/1.0',
  });
- 
+
  export const handleResponseHeaders: Middleware = (ctx, next) => {
 diff --git a/src/service/sponsor-block.service.ts b/src/service/sponsor-block.service.ts
 index 94412e2..d5f303d 100644
@@ -309,7 +309,7 @@ index 94412e2..d5f303d 100644
 @@ -13,15 +13,39 @@ export interface SegmentItem {
      description: string;
  }
- 
+
 -export function getSkipSegments(videoId: string, cid = ''): Promise<FetchResponse> {
 +export interface SponsorBlockRequestOptions {
 +    categories: string[];
@@ -536,3 +536,30 @@ index 3155cd0..b9a4f1e 100644
  function createAirborneDanmaku(segments, options) {
    return segments.map((segment, index) => {
      const id = String(index + 1);
+
+# Incremental fix: Chronos response hook and summary prepend
+diff --git a/modules/bilibili-bsbsb.sgmodule b/modules/bilibili-bsbsb.sgmodule
+index 224c48c..d0b1fe1 100644
+--- a/modules/bilibili-bsbsb.sgmodule
++++ b/modules/bilibili-bsbsb.sgmodule
+@@ -9,6 +9,7 @@ DOMAIN,bsbsb.top,{{{API策略}}}
+
+ [Script]
+ {{{空降助手}}} = type=http-request,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.community\.service\.dm\.v1\.DM\/DmSegMobile$,argument="{\"categories\":\"{{{类别}}}\",\"actionTypes\":\"{{{动作类型}}}\",\"includeIntroOutro\":\"{{{片头片尾}}}\",\"includePoiHighlight\":\"{{{高能点}}}\",\"summaryDanmaku\":\"{{{开头汇总弹幕}}}\",\"summaryDanmakuMs\":\"{{{汇总弹幕毫秒}}}\",\"systemNotification\":\"{{{系统通知}}}\",\"notificationCooldownMinutes\":\"{{{通知冷却分钟}}}\",\"minDuration\":\"{{{最短片段秒数}}}\",\"mergeGap\":\"{{{合并间隔秒数}}}\",\"offsetMs\":\"{{{空降提前毫秒}}}\",\"maxSegments\":\"{{{最大注入数}}}\",\"cacheMinutes\":\"{{{缓存分钟}}}\",\"logLevel\":\"{{{日志等级}}}\"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,timeout=10,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js
++bilibili.bsbsb.chronos = type=http-response,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.app\.(?:view\.v1\.View|viewunite\.v1\.View)\/ViewProgress$,argument="{\"sponsorBlock\":\"{{{空降助手}}}\",\"logLevel\":\"{{{日志等级}}}\"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,timeout=10,script-path=https://raw.githubusercontent.com/kokoryh/Sparkle/refs/heads/master/dist/bilibili.protobuf.response.js
+
+ [MITM]
+ hostname = %APPEND% grpc.biliapi.net, app.bilibili.com
+diff --git a/modules/scripts/bilibili-bsbsb.airborne.js b/modules/scripts/bilibili-bsbsb.airborne.js
+index b9a4f1e..f13c7f7 100644
+--- a/modules/scripts/bilibili-bsbsb.airborne.js
++++ b/modules/scripts/bilibili-bsbsb.airborne.js
+@@ -4542,7 +4542,7 @@ var handleDmSegMobileReply = (ctx2, next) => {
+   const options = ctx2.state.sponsorBlockOptions;
+   const segments = ctx2.state.segments;
+   if (ctx2.state.includeSummaryDanmaku) {
+-    message.elems.push(createSummaryDanmaku(segments, options));
++    message.elems.unshift(createSummaryDanmaku(segments, options));
+   }
+   message.elems.push(...createAirborneDanmaku(segments, options));
+   ctx2.response.bodyBytes = DmSegMobileReply.toBinary(message);

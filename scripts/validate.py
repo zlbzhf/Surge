@@ -34,6 +34,7 @@ BSBSB_DOC = ROOT / "docs" / "modules" / "bilibili-bsbsb.md"
 BSBSB_PATCH = ROOT / "docs" / "modules" / "bilibili-bsbsb-sparkle.patch"
 GPL_LICENSE = ROOT / "modules" / "LICENSES" / "GPL-3.0.txt"
 BSBSB_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js"
+BSBSB_CHRONOS_SCRIPT_URL = "https://raw.githubusercontent.com/kokoryh/Sparkle/refs/heads/master/dist/bilibili.protobuf.response.js"
 FORBIDDEN_ACTIVE_GROUPS = {
     "BiliBili": "BiliBili should stay handled by SukkaW domestic/stream rules, not as an independent active policy group",
 }
@@ -328,7 +329,12 @@ def check_bsbsb_module() -> list[Issue]:
         ("#!name=BilibiliSponsorBlock 空降助手", "module should have a stable human-readable name"),
         ("DOMAIN,bsbsb.top,{{{API策略}}}", "bsbsb.top should be routed by the configurable API policy"),
         (BSBSB_SCRIPT_URL, "module should reference the same-repo airborne script URL"),
-        ("DmSegMobile", "module should only hook the Bilibili danmaku segment endpoint"),
+        ("DmSegMobile", "module should hook the Bilibili danmaku segment endpoint"),
+        ("bilibili.bsbsb.chronos", "module should install the Chronos response hook required for automatic seeking"),
+        ("type=http-response", "Chronos hook should run as an HTTP response script"),
+        ("ViewProgress", "Chronos hook should patch Bilibili ViewProgress responses"),
+        (BSBSB_CHRONOS_SCRIPT_URL, "module should reference Sparkle's protobuf response script for Chronos patching"),
+        ("\\\"sponsorBlock\\\"", "Chronos hook should pass sponsorBlock argument so it can be disabled with the airborne helper"),
         ("grpc.biliapi.net, app.bilibili.com", "MITM scope should stay limited to the two required Bilibili hosts"),
         ("汇总弹幕:1", "summary danmaku should be enabled by default"),
         ("系统通知:0", "system notification should stay opt-in and disabled by default"),
@@ -408,6 +414,8 @@ def check_bsbsb_module() -> list[Issue]:
         )
     if "categoryLabel" not in script_text:
         issues.append(Issue(BSBSB_SCRIPT, 1, "script should keep category label metadata in extra JSON / POI display text"))
+    if "message.elems.unshift(createSummaryDanmaku" not in script_text:
+        issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku should be prepended before normal danmaku elems so it is not dropped by list order/limits"))
     if "action: \"\"" not in script_text:
         issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku should be non-clickable and must not use airborne actions"))
 

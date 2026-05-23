@@ -4,12 +4,13 @@
 
 - 模块：`modules/bilibili-bsbsb.sgmodule`
 - 脚本：`modules/scripts/bilibili-bsbsb.airborne.js`
+- Chronos 响应脚本：窄范围复用 `kokoryh/Sparkle` 的 `bilibili.protobuf.response.js`，只匹配 `ViewProgress` 用于自动跳能力
 - 导入 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule`
 
 ## 定位
 
 - **不进主 Surge.conf**：它需要 MITM 和脚本，属于可选增强，不是公开主配置默认能力。
-- **只处理空降助手**：拦截 Bilibili App 弹幕分段接口，查询 `bsbsb.top` 的片段数据，再注入可点击空降弹幕。
+- **只处理空降助手**：拦截 Bilibili App 弹幕分段接口，查询 `bsbsb.top` 的片段数据，再注入可点击空降弹幕；同时窄范围拦截 `ViewProgress` 响应，把 Bilibili Chronos 指向 Sparkle 维护的可自动跳版本。
 - **失败开放**：bsbsb API 失败、超时、Cloudflare 拦截或返回空数据时，保留原始 B 站响应，不影响播放。
 
 ## 默认行为
@@ -44,7 +45,14 @@ API策略 = DIRECT
 
 ## 自动跳机制
 
-Sparkle 能自动跳过 skip 片段，并不是因为模块自己调用播放器 API，而是因为 Bilibili App 内置的 Chronos 弹幕逻辑会识别一条特殊空降弹幕：
+Sparkle 能自动跳过 skip 片段，并不是因为模块自己调用播放器 API，而是依赖两条链路同时生效：
+
+1. `DmSegMobile` 请求脚本注入一条特殊空降弹幕；
+2. `ViewProgress` 响应脚本把 Bilibili 下发的 Chronos 运行包替换为 Sparkle 维护的可识别空降助手版本。
+
+如果只注入弹幕、不替换 Chronos，Bilibili App 通常只会显示“空指部已就位”的空降提示，但不会真正自动 seek。
+
+Chronos 自动跳识别的特殊空降弹幕是：
 
 ```text
 content = "空指部已就位"
@@ -70,7 +78,7 @@ action = "airborne:<目标毫秒>"
 
 ## MITM 范围
 
-模块只追加两个必要 hostname：
+模块只追加两个必要 hostname，分别用于 `DmSegMobile` 注入和 `ViewProgress` Chronos 替换：
 
 ```ini
 hostname = %APPEND% grpc.biliapi.net, app.bilibili.com
@@ -124,6 +132,14 @@ bsbsb.top 有 Cloudflare 防护；请求头会显式设置：
    - 把 `API策略` 改为可访问 bsbsb.top 的代理策略。
    - 把 `日志等级` 临时改为 `1` 观察脚本日志。
    - 确认 Bilibili App 请求命中了 `DmSegMobile` 接口。
+5. 如果只显示“空指部已就位”但不自动跳：
+   - 确认模块已刷新到包含 `bilibili.bsbsb.chronos` 的版本。
+   - 确认 Surge 的 HTTP Response 脚本命中了 `ViewProgress` 接口。
+   - 重新打开视频，必要时重启 Bilibili App，让新的 Chronos 包重新下发。
+6. 如果开头汇总弹幕不出现：
+   - 确认“开头汇总弹幕=1”。
+   - 从视频开头重新进入，汇总只注入第一个弹幕分段。
+   - 确认当前视频确实有 bsbsb 片段数据；没有片段时不会生成汇总。
 
 ## 可调参数建议
 
