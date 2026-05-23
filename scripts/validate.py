@@ -334,7 +334,7 @@ def check_bsbsb_module() -> list[Issue]:
         ("type=http-response", "Chronos hook should run as an HTTP response script"),
         ("ViewProgress", "Chronos hook should patch Bilibili ViewProgress responses"),
         (BSBSB_CHRONOS_SCRIPT_URL, "module should reference Sparkle's protobuf response script for Chronos patching"),
-        ("\\\"sponsorBlock\\\"", "Chronos hook should pass sponsorBlock argument so it can be disabled with the airborne helper"),
+        ('argument="{"sponsorBlock":"{{{空降助手}}}","logLevel":"{{{日志等级}}}"}"', "Chronos hook should pass parseable sponsorBlock JSON argument so it can be disabled with the airborne helper"),
         ("grpc.biliapi.net, app.bilibili.com", "MITM scope should stay limited to the two required Bilibili hosts"),
         ("汇总弹幕:1", "summary danmaku should be enabled by default"),
         ("系统通知:0", "system notification should stay opt-in and disabled by default"),
@@ -349,6 +349,7 @@ def check_bsbsb_module() -> list[Issue]:
         if needle not in module_text:
             issues.append(Issue(BSBSB_MODULE, 1, message))
     forbidden_module_needles = [
+        ('argument="{\\\\"', "Surge passes module argument backslashes literally; do not shell/INI-escape JSON quotes inside argument"),
         ("hostname = *", "module must not MITM all hostnames"),
         ("api.bilibili.com", "bsbsb-only module should not MITM broad Bilibili REST hosts"),
         ("api.live.bilibili.com", "bsbsb-only module should not touch live APIs"),

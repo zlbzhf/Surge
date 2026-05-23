@@ -632,3 +632,57 @@ index f13c7f7..c96a04b 100644
  function createAirborneDanmaku(segments, options) {
    return segments.map((segment, index) => {
      const id = String(index + 1);
+
+# Incremental fix: Surge argument JSON must not be backslash-escaped
+diff --git a/docs/modules/bilibili-bsbsb.md b/docs/modules/bilibili-bsbsb.md
+index ec6cf5c..a244409 100644
+--- a/docs/modules/bilibili-bsbsb.md
++++ b/docs/modules/bilibili-bsbsb.md
+@@ -136,7 +136,10 @@ bsbsb.top 有 Cloudflare 防护；请求头会显式设置：
+    - 确认模块已刷新到包含 `bilibili.bsbsb.chronos` 的版本。
+    - 确认 Surge 的 HTTP Response 脚本命中了 `ViewProgress` 接口。
+    - 重新打开视频，必要时重启 Bilibili App，让新的 Chronos 包重新下发。
+-6. 如果开头汇总弹幕不出现：
++6. 如果 Surge 日志出现 `SyntaxError: JSON Parse error: Unrecognized token '\\'`：
++   - 说明模块里的 `argument` JSON 被反斜杠转义了，Surge 会把反斜杠原样传给 `$argument`，导致脚本在 `JSON.parse($argument)` 阶段就失败。
++   - 删除旧模块后重新导入最新版；新版 `argument` 写法与 Sparkle 原模块一致，不再把 JSON 内部引号写成 `\\"`。
++7. 如果开头汇总弹幕不出现：
+    - 确认“开头汇总弹幕=1”。
+    - 确认“汇总弹幕毫秒”已更新为默认 3000 或更晚；旧版 800ms 可能因为请求完成/自动跳转太晚而错过。
+    - 从视频开头重新进入，汇总只注入第一个弹幕分段。
+diff --git a/modules/bilibili-bsbsb.sgmodule b/modules/bilibili-bsbsb.sgmodule
+index e42a700..d45aae1 100644
+--- a/modules/bilibili-bsbsb.sgmodule
++++ b/modules/bilibili-bsbsb.sgmodule
+@@ -8,8 +8,8 @@
+ DOMAIN,bsbsb.top,{{{API策略}}}
+
+ [Script]
+-{{{空降助手}}} = type=http-request,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.community\.service\.dm\.v1\.DM\/DmSegMobile$,argument="{\"categories\":\"{{{类别}}}\",\"actionTypes\":\"{{{动作类型}}}\",\"includeIntroOutro\":\"{{{片头片尾}}}\",\"includePoiHighlight\":\"{{{高能点}}}\",\"summaryDanmaku\":\"{{{开头汇总弹幕}}}\",\"summaryDanmakuMs\":\"{{{汇总弹幕毫秒}}}\",\"systemNotification\":\"{{{系统通知}}}\",\"notificationCooldownMinutes\":\"{{{通知冷却分钟}}}\",\"minDuration\":\"{{{最短片段秒数}}}\",\"mergeGap\":\"{{{合并间隔秒数}}}\",\"offsetMs\":\"{{{空降提前毫秒}}}\",\"maxSegments\":\"{{{最大注入数}}}\",\"cacheMinutes\":\"{{{缓存分钟}}}\",\"logLevel\":\"{{{日志等级}}}\"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,timeout=10,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js
+-bilibili.bsbsb.chronos = type=http-response,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.app\.(?:view\.v1\.View|viewunite\.v1\.View)\/ViewProgress$,argument="{\"sponsorBlock\":\"{{{空降助手}}}\",\"logLevel\":\"{{{日志等级}}}\"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,timeout=10,script-path=https://raw.githubusercontent.com/kokoryh/Sparkle/refs/heads/master/dist/bilibili.protobuf.response.js
++{{{空降助手}}} = type=http-request,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.community\.service\.dm\.v1\.DM\/DmSegMobile$,argument="{"categories":"{{{类别}}}","actionTypes":"{{{动作类型}}}","includeIntroOutro":"{{{片头片尾}}}","includePoiHighlight":"{{{高能点}}}","summaryDanmaku":"{{{开头汇总弹幕}}}","summaryDanmakuMs":"{{{汇总弹幕毫秒}}}","systemNotification":"{{{系统通知}}}","notificationCooldownMinutes":"{{{通知冷却分钟}}}","minDuration":"{{{最短片段秒数}}}","mergeGap":"{{{合并间隔秒数}}}","offsetMs":"{{{空降提前毫秒}}}","maxSegments":"{{{最大注入数}}}","cacheMinutes":"{{{缓存分钟}}}","logLevel":"{{{日志等级}}}"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,timeout=10,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js
++bilibili.bsbsb.chronos = type=http-response,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.app\.(?:view\.v1\.View|viewunite\.v1\.View)\/ViewProgress$,argument="{"sponsorBlock":"{{{空降助手}}}","logLevel":"{{{日志等级}}}"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,timeout=10,script-path=https://raw.githubusercontent.com/kokoryh/Sparkle/refs/heads/master/dist/bilibili.protobuf.response.js
+
+ [MITM]
+ hostname = %APPEND% grpc.biliapi.net, app.bilibili.com
+diff --git a/scripts/validate.py b/scripts/validate.py
+index e3de8f8..5f63268 100644
+--- a/scripts/validate.py
++++ b/scripts/validate.py
+@@ -334,7 +334,7 @@ def check_bsbsb_module() -> list[Issue]:
+         ("type=http-response", "Chronos hook should run as an HTTP response script"),
+         ("ViewProgress", "Chronos hook should patch Bilibili ViewProgress responses"),
+         (BSBSB_CHRONOS_SCRIPT_URL, "module should reference Sparkle's protobuf response script for Chronos patching"),
+-        ("\\\"sponsorBlock\\\"", "Chronos hook should pass sponsorBlock argument so it can be disabled with the airborne helper"),
++        ('argument="{"sponsorBlock":"{{{空降助手}}}","logLevel":"{{{日志等级}}}"}"', "Chronos hook should pass parseable sponsorBlock JSON argument so it can be disabled with the airborne helper"),
+         ("grpc.biliapi.net, app.bilibili.com", "MITM scope should stay limited to the two required Bilibili hosts"),
+         ("汇总弹幕:1", "summary danmaku should be enabled by default"),
+         ("系统通知:0", "system notification should stay opt-in and disabled by default"),
+@@ -349,6 +349,7 @@ def check_bsbsb_module() -> list[Issue]:
+         if needle not in module_text:
+             issues.append(Issue(BSBSB_MODULE, 1, message))
+     forbidden_module_needles = [
++        ('argument="{\\\\"', "Surge passes module argument backslashes literally; do not shell/INI-escape JSON quotes inside argument"),
+         ("hostname = *", "module must not MITM all hostnames"),
+         ("api.bilibili.com", "bsbsb-only module should not MITM broad Bilibili REST hosts"),
+         ("api.live.bilibili.com", "bsbsb-only module should not touch live APIs"),

@@ -136,7 +136,10 @@ bsbsb.top 有 Cloudflare 防护；请求头会显式设置：
    - 确认模块已刷新到包含 `bilibili.bsbsb.chronos` 的版本。
    - 确认 Surge 的 HTTP Response 脚本命中了 `ViewProgress` 接口。
    - 重新打开视频，必要时重启 Bilibili App，让新的 Chronos 包重新下发。
-6. 如果开头汇总弹幕不出现：
+6. 如果 Surge 日志出现 `SyntaxError: JSON Parse error: Unrecognized token '\\'`：
+   - 说明模块里的 `argument` JSON 被反斜杠转义了，Surge 会把反斜杠原样传给 `$argument`，导致脚本在 `JSON.parse($argument)` 阶段就失败。
+   - 删除旧模块后重新导入最新版；新版 `argument` 写法与 Sparkle 原模块一致，不再把 JSON 内部引号写成 `\\"`。
+7. 如果开头汇总弹幕不出现：
    - 确认“开头汇总弹幕=1”。
    - 确认“汇总弹幕毫秒”已更新为默认 3000 或更晚；旧版 800ms 可能因为请求完成/自动跳转太晚而错过。
    - 从视频开头重新进入，汇总只注入第一个弹幕分段。
