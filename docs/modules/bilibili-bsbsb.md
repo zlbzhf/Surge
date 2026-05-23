@@ -27,6 +27,7 @@
 系统通知 = 0
 通知冷却分钟 = 30
 UI观测 = 0
+CommandDm实验 = 0
 最短片段秒数 = 5
 合并间隔秒数 = 1.5
 空降提前毫秒 = 2000
@@ -43,6 +44,7 @@ API策略 = DIRECT
 - **开头汇总弹幕**默认开启：优先在第一个弹幕分段中插入多条小字号、分行式空降卡片提示，默认约 3000ms 出现，用来提示本视频包含哪些类型、各类型数量/时长以及是否可自动跳过或手动空降。
 - **系统通知**默认关闭：如需 Surge 系统弹窗，把“系统通知=1”；通知带“通知冷却”（默认 30 分钟），避免同一视频反复弹出。
 - **UI观测**默认关闭：把“UI观测=1”后，响应脚本会只读记录 `DmView` / `ViewProgress` 里的 `command_dms`、`ContractCard`、`OperationCard`、`attention`、`post_panel` / `post_panel2` 等摘要；它不会注入卡片，也不会上传数据，用于先捕获 B 站真实原生互动卡片样本。
+- **CommandDm实验**默认关闭：把“CommandDm实验=1”后，脚本会向 `DmView.command.command_dms` 注入一条极简 `#ATTENTION#` 互动弹幕，用于验证 B 站 App 是否显示本地构造的原生卡片。该开关只建议短时间实验，验证完应关回 `0`。
 - 片段太短会被过滤，相邻/重叠片段会被合并，避免弹幕列表被污染。
 
 ## 自动跳机制
@@ -86,7 +88,7 @@ action = "airborne:<目标毫秒>"
 - `ViewProgress`：`video_guide.contract_card`（ContractCard）、`dm.command_dms`、`dm.cards`（OperationCard）、`dm.attention`、Chronos md5/file 摘要。
 - `iPad ViewProgress`：`video_guide` 字节长度与 Chronos 摘要。
 
-这些字段来自 `bilibili-API-collect` 的 `dm.proto` / `viewunite.proto`，也是后续实现 B 站原生互动卡片显示的候选入口。当前版本只观测，不构造或注入 `ContractCard` / `OperationCard`，避免在没有真实样本时破坏播放页 UI。日志只输出紧凑摘要和截断文案，不 dump 整个 protobuf body。
+这些字段来自 `bilibili-API-collect` 的 `dm.proto` / `viewunite.proto`，也是后续实现 B 站原生互动卡片显示的候选入口。当前版本默认只观测，不构造或注入 `ContractCard` / `OperationCard`，避免在没有真实样本时破坏播放页 UI。根据已抓到的 `#GRADE#` / `#VOTE#` / `#ATTENTION#` 样本，另提供默认关闭的 `CommandDm实验`：开启后只向 `DmView.command.command_dms` 前插一条极简 `#ATTENTION#`，用来测试客户端是否会渲染本地构造的原生互动卡片。日志只输出紧凑摘要和截断文案，不 dump 整个 protobuf body。
 
 ## MITM 范围
 
@@ -167,6 +169,7 @@ bsbsb.top 有 Cloudflare 防护；请求头会显式设置：
 - **不想看到开头汇总**：把“开头汇总弹幕=0”。
 - **想要系统弹窗**：把“系统通知=1”，必要时调整“通知冷却分钟”。
 - **想抓原生卡片样本**：临时把“UI观测=1”并把“日志等级”调到 `3` 或更低，打开带互动卡片/关注引导/运营卡片的视频后查看 `[BSBSB:UI]` 日志；抓完建议关回 `0`。
+- **想测试原生互动提示**：临时把“CommandDm实验=1”，从视频开头重新进入，观察是否出现“空降助手提示”样式的关注互动弹幕；如果没有显示，把日志里的 `DmView:commandDmExperiment` 发回来，测试后立刻关回 `0`。
 - **空降弹幕太多**：降低“最大注入数”或提高“最短片段秒数”。
 - **bsbsb 查询频繁**：提高“缓存分钟”。
 
