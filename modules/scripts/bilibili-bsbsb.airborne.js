@@ -334,7 +334,6 @@ var initArgument = createInitArgumentMiddleware({
   maxSegments: 12,
   cacheMinutes: 60,
   uiObservation: false,
-  commandDmExperiment: false,
   userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 BilibiliSponsorBlock-Surge/1.0"
 });
 var handleResponseHeaders = (ctx2, next) => {
@@ -5027,17 +5026,9 @@ var handleMainListReply = (ctx2, next) => {
 };
 
 var handleDmViewReply = (ctx2, next) => {
-  const observe = shouldObserveUi(ctx2);
-  const experiment = shouldInjectCommandDm(ctx2);
-  if (!observe && !experiment) return next();
+  if (!shouldObserveUi(ctx2)) return next();
   const message = DmViewReply.fromBinary(ctx2.response.bodyBytes);
-  if (observe) {
-    inspectBilibiliUi("DmView", summarizeDmViewReply(message));
-  }
-  if (experiment) {
-    injectExperimentalCommandDm(message, ctx2.argument.commandDmProgressMs);
-    inspectBilibiliUi("DmView:commandDmExperiment", summarizeDmViewReply(message));
-  }
+  inspectBilibiliUi("DmView", summarizeDmViewReply(message));
   ctx2.response.bodyBytes = DmViewReply.toBinary(message);
   return next();
 };
@@ -5059,9 +5050,6 @@ var handleViewProgressReply = (ctx2, next) => {
 function shouldObserveUi(ctx2) {
   return toBoolean(ctx2.argument.uiObservation);
 }
-function shouldInjectCommandDm(ctx2) {
-  return toBoolean(ctx2.argument.commandDmExperiment);
-}
 function isSponsorBlockEnabled(value) {
   if (value === void 0 || value === null) return true;
   if (typeof value === "boolean") return value;
@@ -5072,53 +5060,6 @@ function isSponsorBlockEnabled(value) {
 }
 function inspectBilibiliUi(kind, payload) {
   Logger.warn("[BSBSB:UI]", kind, payload);
-}
-function injectExperimentalCommandDm(message, progressValue) {
-  if (!message.command) message.command = DmViewCommand.create();
-  const existing = findFirstDecodedCommandDm(message.command.commandDms);
-  const id = String(Date.now() % 2147483647 + 900000000);
-  const progress = Math.round(toNumber(progressValue, 3e3, 0, 6e4));
-  const commandDm = CommandDm.create({
-    id,
-    oid: existing?.oid || "0",
-    mid: existing?.mid || "0",
-    command: "#ATTENTION#",
-    content: "空降助手提示",
-    progress,
-    ctime: formatCommandDmTime(new Date()),
-    mtime: formatCommandDmTime(new Date()),
-    extra: JSON.stringify({
-      duration: 5e3,
-      posX: 333.5,
-      posY: 243.75,
-      posX_2: 50,
-      posY_2: 65,
-      icon: "http://i0.hdslb.com/bfs/app/d453dc8b380c6d6a6c236c0bf291a95813d6d4ba.png",
-      type: 2,
-      arc_type: 0,
-      upower_open: false,
-      upower_state: 0,
-      upower_icon: "",
-      upower_icon_web: "",
-      source: "BilibiliSponsorBlock",
-      msg: "空降助手提示"
-    }),
-    idstr: id
-  });
-  message.command.commandDms.unshift(CommandDm.toBinary(commandDm));
-}
-function findFirstDecodedCommandDm(commandDms) {
-  for (const bytes of commandDms || []) {
-    try {
-      return CommandDm.fromBinary(bytes);
-    } catch {
-    }
-  }
-  return null;
-}
-function formatCommandDmTime(date) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 function summarizeDmViewReply(message) {
   const commandBytes = message.command?.commandDms || [];
