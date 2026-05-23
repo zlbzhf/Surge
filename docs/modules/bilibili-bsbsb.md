@@ -4,7 +4,7 @@
 
 - 模块：`modules/bilibili-bsbsb.sgmodule`
 - 脚本：`modules/scripts/bilibili-bsbsb.airborne.js`
-- Chronos/UI 响应脚本：同一个 `bilibili-bsbsb.airborne.js` 窄范围匹配 `ViewProgress`，保留 Chronos 自动跳补丁；可选匹配 `DmView` / `ViewProgress` 做只读 UI 观测
+- Chronos/UI 响应脚本：同一个 `bilibili-bsbsb.airborne.js` 窄范围匹配 `ViewProgress`，保留 Chronos 自动跳补丁；默认不再匹配 `DmView`，避免即使只读解析/重封包也影响 B 站原生弹幕层
 - 导入 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule`
 
 ## 定位
@@ -42,7 +42,7 @@ API策略 = DIRECT
 - `poi_highlight` 通过“高能点=1”额外启用；启用后脚本会自动追加 `poi` 动作类型。
 - **开头汇总弹幕**默认关闭：现场反馈表明额外注入多条汇总弹幕可能导致 B 站客户端整层弹幕不可见，因此默认不再注入汇总弹幕，只保留普通空降/自动跳弹幕。若手动开启，脚本会优先读取 `DmSegMobile` 请求里的实际播放窗口 `ps` / `pe`，按“当前进入播放位置 + 汇总弹幕毫秒”（默认 3000ms）计算出现时间；如果请求里没有播放窗口，才回退到弹幕分段开头约 3000ms。
 - **系统通知**默认关闭：如需 Surge 系统弹窗，把“系统通知=1”；通知带“通知冷却”（默认 30 分钟），避免同一视频反复弹出。
-- **UI观测**默认关闭：把“UI观测=1”后，响应脚本会只读记录 `DmView` / `ViewProgress` 里的 `command_dms`、`ContractCard`、`OperationCard`、`attention`、`post_panel` / `post_panel2` 等摘要；它不会注入卡片，也不会上传数据，用于先捕获 B 站真实原生互动卡片样本。
+- **UI观测**默认关闭：当前默认响应 hook 只匹配 `ViewProgress`，即使把“UI观测=1”也只会记录 `ViewProgress` 里的 `ContractCard`、`OperationCard`、`attention` 等摘要；不再默认拦截 `DmView`，因为现场反馈显示仅解析/重封包 `DmView` 也可能导致原生弹幕层不可见。
 - 片段太短会被过滤，相邻/重叠片段会被合并，避免弹幕列表被污染。
 
 ## 自动跳机制
@@ -80,11 +80,12 @@ action = "airborne:<目标毫秒>"
 
 ## UI观测与原生卡片 Spike
 
-这次没有直接猜测 B 站卡片字段，而是先加一个默认关闭的只读观测模式。开启“UI观测=1”后，脚本会在 Surge 日志输出 `[BSBSB:UI]` 摘要，范围包括：
+这次没有直接猜测 B 站卡片字段，而是保留一个默认关闭的只读观测模式。开启“UI观测=1”后，脚本会在 Surge 日志输出 `[BSBSB:UI]` 摘要，默认范围仅包括：
 
-- `DmView`：`special_dms`、`activity_meta`、`command.command_dms`、`post_panel`、`post_panel2`、`qoe` 字节长度。
 - `ViewProgress`：`video_guide.contract_card`（ContractCard）、`dm.command_dms`、`dm.cards`（OperationCard）、`dm.attention`、Chronos md5/file 摘要。
 - `iPad ViewProgress`：`video_guide` 字节长度与 Chronos 摘要。
+
+`DmView` 不再被默认模块匹配。现场反馈表明，即使 `UI观测=0` 且代码对 `DmView` 只是 parse 后直接 rewrap，也可能导致 B 站客户端弹幕层不可见；因此默认模块只保留 `ViewProgress` 给 Chronos 自动跳补丁使用。`DmView` 原生卡片研究后续只能在单独实验模块里抓样本，不能混进稳定默认模块。
 
 这些字段来自 `bilibili-API-collect` 的 `dm.proto` / `viewunite.proto`，也是后续实现 B 站原生互动卡片显示的候选入口。当前版本只观测，不构造或注入 `CommandDm` / `ContractCard` / `OperationCard`，避免破坏播放页 UI。实测发现向 `DmView.command.command_dms` 本地插入构造的 `#ATTENTION#` 会导致客户端弹幕层不可用，因此已禁用该实验路径；后续原生卡片研究必须继续先只读抓样本。日志只输出紧凑摘要和截断文案，不 dump 整个 protobuf body。
 

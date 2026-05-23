@@ -329,12 +329,11 @@ def check_bsbsb_module() -> list[Issue]:
         ("#!name=BilibiliSponsorBlock 空降助手", "module should have a stable human-readable name"),
         ("DOMAIN,bsbsb.top,{{{API策略}}}", "bsbsb.top should be routed by the configurable API policy"),
         (BSBSB_SCRIPT_URL, "module should reference the same-repo airborne script URL"),
-        ("bilibili-bsbsb.airborne.js?v=20260523-summary-default-off-1", "module should cache-bust the airborne script URL after defaulting summary danmaku off so Surge does not run stale code"),
+        ("bilibili-bsbsb.airborne.js?v=20260523-no-dmview-default-1", "module should cache-bust the airborne script URL after removing DmView from the default hook so Surge does not run stale code"),
         ("DmSegMobile", "module should hook the Bilibili danmaku segment endpoint"),
         ("bilibili.bsbsb.chronos", "module should install the Chronos response hook required for automatic seeking"),
         ("type=http-response", "Chronos/UI hook should run as an HTTP response script"),
         ("ViewProgress", "Chronos/UI hook should patch Bilibili ViewProgress responses"),
-        ("DmView", "UI observation hook should inspect Bilibili DmView metadata responses"),
         (BSBSB_SCRIPT_URL, "module should use the same-repo script for Chronos patching plus UI observation instead of deleting card fields with an external cleanup script"),
         ('"uiObservation":"{{{UI观测}}}"', "response hook should pass the opt-in UI observation flag to the script"),
         ('"sponsorBlock":"{{{空降助手}}}"', "Chronos hook should pass parseable sponsorBlock JSON argument so it can be disabled with the airborne helper"),
@@ -359,6 +358,8 @@ def check_bsbsb_module() -> list[Issue]:
         ("api.live.bilibili.com", "bsbsb-only module should not touch live APIs"),
         ("line3-h5-mobile-api.biligame.com", "bsbsb-only module should not touch Biligame APIs"),
         ("skip-server-cert-verify", "module must not disable certificate verification"),
+        ("DM\\/DmView", "default module must not intercept DmView; even parse/rewrap can hide the Bilibili danmaku layer"),
+        ("DM/DmView", "default module must not intercept DmView; even parse/rewrap can hide the Bilibili danmaku layer"),
     ]
     for needle, message in forbidden_module_needles:
         if needle in module_text:
@@ -464,7 +465,7 @@ def check_bsbsb_module() -> list[Issue]:
         ("空指部已就位", "docs should document the exact skip danmaku content"),
         ("开头汇总弹幕", "docs should document the intro summary danmaku feature"),
         ("系统通知", "docs should document optional system notifications"),
-        ("UI观测", "docs should document the opt-in DmView/ViewProgress UI/card observation mode"),
+        ("UI观测", "docs should document the opt-in ViewProgress UI/card observation mode"),
         ("ContractCard", "docs should name the native playback card field being observed before injection experiments"),
         ("默认关闭", "docs should state system notification is disabled by default"),
         ("通知冷却", "docs should document notification cooldown behavior"),
