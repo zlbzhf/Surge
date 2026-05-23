@@ -563,3 +563,72 @@ index b9a4f1e..f13c7f7 100644
    }
    message.elems.push(...createAirborneDanmaku(segments, options));
    ctx2.response.bodyBytes = DmSegMobileReply.toBinary(message);
+
+# Incremental fix: robust summary danmaku display
+diff --git a/modules/bilibili-bsbsb.sgmodule b/modules/bilibili-bsbsb.sgmodule
+index d0b1fe1..e42a700 100644
+--- a/modules/bilibili-bsbsb.sgmodule
++++ b/modules/bilibili-bsbsb.sgmodule
+@@ -1,8 +1,8 @@
+ #!name=BilibiliSponsorBlock 空降助手
+ #!desc=基于 bsbsb.top / 小电视空降助手，为 B 站 App 注入可配置空降点；不包含 B 站去广告、皮肤、直播或账号相关改写。
+ #!category=Enhancement
+-#!arguments=空降助手:bilibili.bsbsb.airborne,类别:sponsor|selfpromo|interaction,动作类型:skip,片头片尾:0,高能点:0,开头汇总弹幕:1,汇总弹幕毫秒:800,系统通知:0,通知冷却分钟:30,最短片段秒数:5,合并间隔秒数:1.5,空降提前毫秒:2000,最大注入数:12,缓存分钟:60,API策略:DIRECT,日志等级:3
+-#!arguments-desc=空降助手\n- bilibili.bsbsb.airborne: 开启\n- #: 关闭整条脚本\n\n类别\n- 默认 sponsor|selfpromo|interaction\n- 可手动追加 intro|outro|padding|music_offtopic|poi_highlight\n- 使用竖线分隔，避免 Surge 模块参数逗号歧义\n\n动作类型\n- 默认 skip\n- 启用高能点时脚本会自动追加 poi\n\n片头片尾\n- 0: 关闭 intro/outro/padding/music_offtopic\n- 1: 开启这些更激进类别\n\n高能点\n- 0: 关闭 poi_highlight\n- 1: 开启高能点空降提示\n\n开头汇总弹幕\n- 1: 默认开启，在第一个弹幕分段开头插入非点击汇总弹幕\n- 0: 关闭汇总弹幕\n\n汇总弹幕毫秒\n- 默认 800，控制汇总弹幕出现时间\n\n系统通知\n- 0: 默认关闭\n- 1: 有空降/高能片段时通过 Surge 发系统通知\n\n通知冷却分钟\n- 默认 30，避免同一视频反复弹通知；设为 0 可不限制\n\n最短片段秒数\n- 默认 5，过滤太短的 skip 片段\n\n合并间隔秒数\n- 默认 1.5，合并相邻/重叠片段\n\n空降提前毫秒\n- 默认 2000；skip 片段在开始后显示，poi 高能点在目标前显示\n\n最大注入数\n- 默认 12，避免弹幕列表污染\n\n缓存分钟\n- 默认 60；设为 0 可关闭缓存\n\nAPI策略\n- bsbsb.top 的访问策略；DIRECT 不稳可改为 Proxy 或指定策略组\n\n日志等级\n- 1 DEBUG\n- 2 INFO\n- 3 WARN\n- 4 ERROR\n- 5 OFF
++#!arguments=空降助手:bilibili.bsbsb.airborne,类别:sponsor|selfpromo|interaction,动作类型:skip,片头片尾:0,高能点:0,开头汇总弹幕:1,汇总弹幕毫秒:3000,系统通知:0,通知冷却分钟:30,最短片段秒数:5,合并间隔秒数:1.5,空降提前毫秒:2000,最大注入数:12,缓存分钟:60,API策略:DIRECT,日志等级:3
++#!arguments-desc=空降助手\n- bilibili.bsbsb.airborne: 开启\n- #: 关闭整条脚本\n\n类别\n- 默认 sponsor|selfpromo|interaction\n- 可手动追加 intro|outro|padding|music_offtopic|poi_highlight\n- 使用竖线分隔，避免 Surge 模块参数逗号歧义\n\n动作类型\n- 默认 skip\n- 启用高能点时脚本会自动追加 poi\n\n片头片尾\n- 0: 关闭 intro/outro/padding/music_offtopic\n- 1: 开启这些更激进类别\n\n高能点\n- 0: 关闭 poi_highlight\n- 1: 开启高能点空降提示\n\n开头汇总弹幕\n- 1: 默认开启，在第一个弹幕分段开头插入非点击汇总弹幕\n- 0: 关闭汇总弹幕\n\n汇总弹幕毫秒\n- 默认 3000，控制汇总弹幕出现时间；如果开头片段会被自动跳过，脚本会顺延到跳过目标后显示\n\n系统通知\n- 0: 默认关闭\n- 1: 有空降/高能片段时通过 Surge 发系统通知\n\n通知冷却分钟\n- 默认 30，避免同一视频反复弹通知；设为 0 可不限制\n\n最短片段秒数\n- 默认 5，过滤太短的 skip 片段\n\n合并间隔秒数\n- 默认 1.5，合并相邻/重叠片段\n\n空降提前毫秒\n- 默认 2000；skip 片段在开始后显示，poi 高能点在目标前显示\n\n最大注入数\n- 默认 12，避免弹幕列表污染\n\n缓存分钟\n- 默认 60；设为 0 可关闭缓存\n\nAPI策略\n- bsbsb.top 的访问策略；DIRECT 不稳可改为 Proxy 或指定策略组\n\n日志等级\n- 1 DEBUG\n- 2 INFO\n- 3 WARN\n- 4 ERROR\n- 5 OFF
+
+ [Rule]
+ DOMAIN,bsbsb.top,{{{API策略}}}
+diff --git a/modules/scripts/bilibili-bsbsb.airborne.js b/modules/scripts/bilibili-bsbsb.airborne.js
+index f13c7f7..c96a04b 100644
+--- a/modules/scripts/bilibili-bsbsb.airborne.js
++++ b/modules/scripts/bilibili-bsbsb.airborne.js
+@@ -4378,7 +4378,7 @@ function normalizeSponsorBlockOptions(argument) {
+     maxSegments: Math.round(toNumber(argument.maxSegments, 12, 1, 50)),
+     cacheMinutes: toNumber(argument.cacheMinutes, 60, 0, 1440),
+     summaryDanmaku: argument.summaryDanmaku === void 0 ? true : toBoolean(argument.summaryDanmaku),
+-    summaryDanmakuMs: Math.round(toNumber(argument.summaryDanmakuMs, 800, 0, 6e4)),
++    summaryDanmakuMs: Math.round(toNumber(argument.summaryDanmakuMs, 3e3, 1e3, 6e4)),
+     systemNotification: toBoolean(argument.systemNotification),
+     notificationCooldownMinutes: toNumber(argument.notificationCooldownMinutes, 30, 0, 1440),
+     userAgent: argument.userAgent || DEFAULT_USER_AGENT
+@@ -4550,9 +4550,10 @@ var handleDmSegMobileReply = (ctx2, next) => {
+ };
+ function createSummaryDanmaku(segments, options) {
+   const summary = summarizeSegments(segments);
++  const summaryId = "900000";
+   return {
+-    id: "9000000000",
+-    progress: options.summaryDanmakuMs,
++    id: summaryId,
++    progress: chooseSummaryProgressMs(segments, options),
+     mode: 5,
+     fontsize: 50,
+     color: 16766720,
+@@ -4562,16 +4563,22 @@ function createSummaryDanmaku(segments, options) {
+     weight: 11,
+     action: "",
+     pool: 0,
+-    idStr: "bsbsb-summary",
+-    attr: 0,
++    idStr: summaryId,
++    attr: 1310724,
+     animation: "",
+-    extra: JSON.stringify({ type: "bsbsb-summary", skipCount: summary.skipCount, skipDurationSeconds: summary.skipDurationSeconds, poiCount: summary.poiCount, categories: summary.categories }),
++    extra: "",
+     colorful: 0 /* NONE_TYPE */,
+     type: 1,
+     oid: "212364987",
+     dmFrom: 1
+   };
+ }
++function chooseSummaryProgressMs(segments, options) {
++  const baseProgress = options.summaryDanmakuMs;
++  const firstEarlySkip = segments.filter((segment) => segment.actionType === "skip").sort((left, right) => left.start - right.start).find((segment) => Math.floor(segment.start * 1e3) <= baseProgress);
++  if (!firstEarlySkip) return baseProgress;
++  return Math.max(baseProgress, Math.floor(firstEarlySkip.end * 1e3) + 1e3);
++}
+ function createAirborneDanmaku(segments, options) {
+   return segments.map((segment, index) => {
+     const id = String(index + 1);

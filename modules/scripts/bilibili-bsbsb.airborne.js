@@ -4378,7 +4378,7 @@ function normalizeSponsorBlockOptions(argument) {
     maxSegments: Math.round(toNumber(argument.maxSegments, 12, 1, 50)),
     cacheMinutes: toNumber(argument.cacheMinutes, 60, 0, 1440),
     summaryDanmaku: argument.summaryDanmaku === void 0 ? true : toBoolean(argument.summaryDanmaku),
-    summaryDanmakuMs: Math.round(toNumber(argument.summaryDanmakuMs, 800, 0, 6e4)),
+    summaryDanmakuMs: Math.round(toNumber(argument.summaryDanmakuMs, 3e3, 1e3, 6e4)),
     systemNotification: toBoolean(argument.systemNotification),
     notificationCooldownMinutes: toNumber(argument.notificationCooldownMinutes, 30, 0, 1440),
     userAgent: argument.userAgent || DEFAULT_USER_AGENT
@@ -4550,9 +4550,10 @@ var handleDmSegMobileReply = (ctx2, next) => {
 };
 function createSummaryDanmaku(segments, options) {
   const summary = summarizeSegments(segments);
+  const summaryId = "900000";
   return {
-    id: "9000000000",
-    progress: options.summaryDanmakuMs,
+    id: summaryId,
+    progress: chooseSummaryProgressMs(segments, options),
     mode: 5,
     fontsize: 50,
     color: 16766720,
@@ -4562,15 +4563,21 @@ function createSummaryDanmaku(segments, options) {
     weight: 11,
     action: "",
     pool: 0,
-    idStr: "bsbsb-summary",
-    attr: 0,
+    idStr: summaryId,
+    attr: 1310724,
     animation: "",
-    extra: JSON.stringify({ type: "bsbsb-summary", skipCount: summary.skipCount, skipDurationSeconds: summary.skipDurationSeconds, poiCount: summary.poiCount, categories: summary.categories }),
+    extra: "",
     colorful: 0 /* NONE_TYPE */,
     type: 1,
     oid: "212364987",
     dmFrom: 1
   };
+}
+function chooseSummaryProgressMs(segments, options) {
+  const baseProgress = options.summaryDanmakuMs;
+  const firstEarlySkip = segments.filter((segment) => segment.actionType === "skip").sort((left, right) => left.start - right.start).find((segment) => Math.floor(segment.start * 1e3) <= baseProgress);
+  if (!firstEarlySkip) return baseProgress;
+  return Math.max(baseProgress, Math.floor(firstEarlySkip.end * 1e3) + 1e3);
 }
 function createAirborneDanmaku(segments, options) {
   return segments.map((segment, index) => {

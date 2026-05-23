@@ -339,7 +339,7 @@ def check_bsbsb_module() -> list[Issue]:
         ("汇总弹幕:1", "summary danmaku should be enabled by default"),
         ("系统通知:0", "system notification should stay opt-in and disabled by default"),
         ("通知冷却分钟:30", "system notification should have a default cooldown"),
-        ("汇总弹幕毫秒:800", "summary danmaku should have a configurable early display time"),
+        ("汇总弹幕毫秒:3000", "summary danmaku should have a conservative configurable display time"),
         ("summaryDanmaku", "module should pass summaryDanmaku argument to the script"),
         ("systemNotification", "module should pass systemNotification argument to the script"),
         ("notificationCooldownMinutes", "module should pass notification cooldown argument to the script"),
@@ -371,6 +371,7 @@ def check_bsbsb_module() -> list[Issue]:
         ("createSummaryDanmaku", "script should inject a non-clickable intro summary danmaku"),
         ("summarizeSegments", "script should summarize skip/poi segment counts"),
         ("summaryDanmakuMs", "script should support configurable summary danmaku timing"),
+        ("chooseSummaryProgressMs", "script should delay summary danmaku when an opening skip would jump past it"),
         ("maybeNotifySummary", "script should support optional system notification with cooldown"),
         ("notificationCooldownMinutes", "script should rate-limit system notifications"),
         ("ctx2.notify(", "script should use Surge notification API only behind the opt-in notification gate"),
@@ -416,6 +417,16 @@ def check_bsbsb_module() -> list[Issue]:
         issues.append(Issue(BSBSB_SCRIPT, 1, "script should keep category label metadata in extra JSON / POI display text"))
     if "message.elems.unshift(createSummaryDanmaku" not in script_text:
         issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku should be prepended before normal danmaku elems so it is not dropped by list order/limits"))
+    summary_field_needles = [
+        ('const summaryId = "900000"', "summary danmaku should use a small numeric id like known-working airborne danmaku"),
+        ("idStr: summaryId", "summary danmaku idStr should stay numeric, not a custom label"),
+        ("attr: 1310724", "summary danmaku should reuse the known-visible airborne attr"),
+        ('extra: ""', "summary danmaku should avoid custom extra metadata that may be filtered by the client"),
+        ("chooseSummaryProgressMs(segments, options)", "summary danmaku should use delayed timing logic instead of a fixed too-early timestamp"),
+    ]
+    for needle, message in summary_field_needles:
+        if needle not in script_text:
+            issues.append(Issue(BSBSB_SCRIPT, 1, message))
     if "action: \"\"" not in script_text:
         issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku should be non-clickable and must not use airborne actions"))
 
