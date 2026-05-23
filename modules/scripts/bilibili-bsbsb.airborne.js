@@ -5237,6 +5237,7 @@ var handleDmSegMobileReq = async (ctx2, next) => {
   const message = DmSegMobileReq.fromBinary(data);
   if (message.type !== 1) exit();
   const { pid, oid, segmentIndex } = message;
+  const dmSegRequest = message;
   const videoId = toBvid(pid);
   const options = normalizeSponsorBlockOptions(ctx2.argument);
   const [{ headers, bodyBytes, h2_trailers }, segments] = await Promise.all([
@@ -5250,6 +5251,7 @@ var handleDmSegMobileReq = async (ctx2, next) => {
     ctx2.state.segments = segments;
     ctx2.state.sponsorBlockOptions = options;
     ctx2.state.segmentIndex = segmentIndex;
+    ctx2.state.dmSegRequest = dmSegRequest;
     ctx2.state.includeSummaryDanmaku = options.summaryDanmaku && shouldIncludeSummaryDanmaku(segments, segmentIndex);
     Logger.debug("[SponsorBlock] inject", {
       videoId,
@@ -5257,7 +5259,8 @@ var handleDmSegMobileReq = async (ctx2, next) => {
       segmentIndex,
       segmentCount: segments.length,
       includeSummary: ctx2.state.includeSummaryDanmaku,
-      summaryProgress: ctx2.state.includeSummaryDanmaku ? chooseSummaryProgressMs(segments, options, segmentIndex) : null
+      summaryProgress: ctx2.state.includeSummaryDanmaku ? chooseSummaryProgressMs(segments, options, segmentIndex, dmSegRequest) : null,
+      playbackStart: getDmSegRequestPlaybackStartMs(dmSegRequest)
     });
     maybeNotifySummary(ctx2, videoId, oid, segments, options);
     return next();
@@ -5537,15 +5540,15 @@ var handleDmSegMobileReply = (ctx2, next) => {
   const options = ctx2.state.sponsorBlockOptions;
   const segments = ctx2.state.segments;
   if (ctx2.state.includeSummaryDanmaku) {
-    message.elems.unshift(...createSummaryDanmaku(segments, options, ctx2.state.segmentIndex));
+    message.elems.unshift(...createSummaryDanmaku(segments, options, ctx2.state.segmentIndex, ctx2.state.dmSegRequest));
   }
   message.elems.push(...createAirborneDanmaku(segments, options));
   ctx2.response.bodyBytes = DmSegMobileReply.toBinary(message);
   return next();
 };
-function createSummaryDanmaku(segments, options, segmentIndex) {
+function createSummaryDanmaku(segments, options, segmentIndex, dmSegRequest) {
   const summary = summarizeSegments(segments);
-  const progress = chooseSummaryProgressMs(segments, options, segmentIndex);
+  const progress = chooseSummaryProgressMs(segments, options, segmentIndex, dmSegRequest);
   return summary.lines.map((content, index) => {
     const summaryId = String(900000 + index);
     return {
@@ -5571,19 +5574,37 @@ function createSummaryDanmaku(segments, options, segmentIndex) {
     };
   });
 }
-function chooseSummaryProgressMs(segments, options, segmentIndex) {
+function chooseSummaryProgressMs(segments, options, segmentIndex, dmSegRequest) {
   const segmentStartMs = getDanmakuSegmentStartMs(segmentIndex);
-  const baseProgress = segmentStartMs + options.summaryDanmakuMs;
+  const playbackStartMs = getDmSegRequestPlaybackStartMs(dmSegRequest);
+  const effectiveStartMs = playbackStartMs === null ? segmentStartMs : Math.max(segmentStartMs, playbackStartMs);
+  const baseProgress = effectiveStartMs + options.summaryDanmakuMs;
   const segmentsInWindow = segments.filter((segment) => isSegmentInDanmakuWindow(segment, segmentIndex)).sort((left, right) => left.start - right.start);
   const firstInWindow = segmentsInWindow[0];
   if (!firstInWindow) return baseProgress;
   const beforeFirstAction = Math.floor(firstInWindow.start * 1e3) - 5e3;
-  const earliestVisible = segmentStartMs + 1e3;
+  const earliestVisible = effectiveStartMs + 1e3;
   const latestBeforeAction = Math.max(earliestVisible, beforeFirstAction);
+  if (effectiveStartMs > segmentStartMs) {
+    const currentSkip = segmentsInWindow.find((segment) => segment.actionType === "skip" && Math.floor(segment.start * 1e3) <= baseProgress && Math.floor(segment.end * 1e3) >= effectiveStartMs);
+    if (currentSkip) return Math.max(baseProgress, Math.floor(currentSkip.end * 1e3) + 1e3);
+    return Math.max(effectiveStartMs, Math.min(baseProgress, latestBeforeAction));
+  }
   if (segmentStartMs > 0) return Math.min(baseProgress, latestBeforeAction);
   const firstEarlySkip = segmentsInWindow.find((segment) => segment.actionType === "skip" && Math.floor(segment.start * 1e3) <= baseProgress);
   if (!firstEarlySkip) return baseProgress;
   return Math.max(baseProgress, Math.floor(firstEarlySkip.end * 1e3) + 1e3);
+}
+function getDmSegRequestPlaybackStartMs(dmSegRequest) {
+  if (!dmSegRequest) return null;
+  const candidates = [dmSegRequest.ps, dmSegRequest.pe];
+  for (const value of candidates) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) continue;
+    const ms = numeric < 1e4 ? Math.floor(numeric * 1e3) : Math.floor(numeric);
+    return ms;
+  }
+  return null;
 }
 function createAirborneDanmaku(segments, options) {
   return segments.map((segment, index) => {
