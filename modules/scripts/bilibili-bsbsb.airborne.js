@@ -4224,8 +4224,8 @@ function getSkipSegments(videoId, cid = "", options = { categories: ["sponsor"],
       "x-ext-version": "0.5.0",
       "User-Agent": options.userAgent || "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 BilibiliSponsorBlock-Surge/1.0"
     },
-    timeout: 3
-    // fail open quickly; never block Bilibili playback for bsbsb lookup
+    timeout: 6
+    // fail open quickly; never block Bilibili playback for too long if bsbsb lookup stalls
   });
 }
 
@@ -4312,7 +4312,16 @@ var handleDmSegMobileReq = async (ctx2, next) => {
   if (segments.length) {
     ctx2.state.segments = segments;
     ctx2.state.sponsorBlockOptions = options;
-    ctx2.state.includeSummaryDanmaku = options.summaryDanmaku && isFirstDanmakuSegment(segmentIndex);
+    ctx2.state.segmentIndex = segmentIndex;
+    ctx2.state.includeSummaryDanmaku = options.summaryDanmaku && shouldIncludeSummaryDanmaku(segments, segmentIndex);
+    Logger.debug("[SponsorBlock] inject", {
+      videoId,
+      cid: oid,
+      segmentIndex,
+      segmentCount: segments.length,
+      includeSummary: ctx2.state.includeSummaryDanmaku,
+      summaryProgress: ctx2.state.includeSummaryDanmaku ? chooseSummaryProgressMs(segments, options, segmentIndex) : null
+    });
     maybeNotifySummary(ctx2, videoId, oid, segments, options);
     return next();
   }
@@ -4423,6 +4432,7 @@ async function fetchSponsorBlock(ctx2, videoId, cid, options = normalizeSponsorB
       return [];
     }
     const segments = parseSegments(body, options);
+    Logger.debug("[SponsorBlock] parsed", { videoId, cid, rawCount: countRawSegments(body), parsedCount: segments.length, firstSegment: segments[0] || null });
     writeCachedSegments(ctx2, cacheKey, segments, options.cacheMinutes);
     return segments;
   } catch (e) {
@@ -4458,6 +4468,14 @@ function writeCachedSegments(ctx2, cacheKey, segments, cacheMinutes) {
     ctx2.setJSON({ createdAt: Date.now(), segments }, cacheKey);
   } catch (e) {
     Logger.debug("[SponsorBlock] cache write failed", e);
+  }
+}
+function countRawSegments(body) {
+  try {
+    const parsed = JSON.parse(body);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
   }
 }
 function parseSegments(body, options) {
@@ -4500,6 +4518,25 @@ function mergeSegments(segments, options) {
 function isFirstDanmakuSegment(segmentIndex) {
   const index = Number(segmentIndex);
   return !Number.isFinite(index) || index <= 1;
+}
+function getDanmakuSegmentStartMs(segmentIndex) {
+  const index = Number(segmentIndex);
+  if (!Number.isFinite(index) || index <= 1) return 0;
+  return (Math.floor(index) - 1) * 6 * 60 * 1e3;
+}
+function getDanmakuSegmentEndMs(segmentIndex) {
+  return getDanmakuSegmentStartMs(segmentIndex) + 6 * 60 * 1e3;
+}
+function isSegmentInDanmakuWindow(segment, segmentIndex) {
+  const startMs = getDanmakuSegmentStartMs(segmentIndex);
+  const endMs = getDanmakuSegmentEndMs(segmentIndex);
+  const segmentStartMs = Math.floor(segment.start * 1e3);
+  return segmentStartMs >= startMs && segmentStartMs < endMs;
+}
+function shouldIncludeSummaryDanmaku(segments, segmentIndex) {
+  if (isFirstDanmakuSegment(segmentIndex)) return true;
+  const firstSegment = [...segments].sort((left, right) => left.start - right.start)[0];
+  return Boolean(firstSegment && isSegmentInDanmakuWindow(firstSegment, segmentIndex));
 }
 function summarizeSegments(segments) {
   const skipSegments = segments.filter((segment) => segment.actionType === "skip");
@@ -4554,16 +4591,16 @@ var handleDmSegMobileReply = (ctx2, next) => {
   const options = ctx2.state.sponsorBlockOptions;
   const segments = ctx2.state.segments;
   if (ctx2.state.includeSummaryDanmaku) {
-    message.elems.unshift(createSummaryDanmaku(segments, options));
+    message.elems.unshift(createSummaryDanmaku(segments, options, ctx2.state.segmentIndex));
   }
   message.elems.push(...createAirborneDanmaku(segments, options));
   ctx2.response.bodyBytes = DmSegMobileReply.toBinary(message);
   return next();
 };
-function createSummaryDanmaku(segments, options) {
+function createSummaryDanmaku(segments, options, segmentIndex) {
   const summary = summarizeSegments(segments);
   const summaryId = "900000";
-  const progress = chooseSummaryProgressMs(segments, options);
+  const progress = chooseSummaryProgressMs(segments, options, segmentIndex);
   return {
     id: summaryId,
     progress,
@@ -4586,9 +4623,17 @@ function createSummaryDanmaku(segments, options) {
     dmFrom: 1
   };
 }
-function chooseSummaryProgressMs(segments, options) {
-  const baseProgress = options.summaryDanmakuMs;
-  const firstEarlySkip = segments.filter((segment) => segment.actionType === "skip").sort((left, right) => left.start - right.start).find((segment) => Math.floor(segment.start * 1e3) <= baseProgress);
+function chooseSummaryProgressMs(segments, options, segmentIndex) {
+  const segmentStartMs = getDanmakuSegmentStartMs(segmentIndex);
+  const baseProgress = segmentStartMs + options.summaryDanmakuMs;
+  const segmentsInWindow = segments.filter((segment) => isSegmentInDanmakuWindow(segment, segmentIndex)).sort((left, right) => left.start - right.start);
+  const firstInWindow = segmentsInWindow[0];
+  if (!firstInWindow) return baseProgress;
+  const beforeFirstAction = Math.floor(firstInWindow.start * 1e3) - 5e3;
+  const earliestVisible = segmentStartMs + 1e3;
+  const latestBeforeAction = Math.max(earliestVisible, beforeFirstAction);
+  if (segmentStartMs > 0) return Math.min(baseProgress, latestBeforeAction);
+  const firstEarlySkip = segmentsInWindow.find((segment) => segment.actionType === "skip" && Math.floor(segment.start * 1e3) <= baseProgress);
   if (!firstEarlySkip) return baseProgress;
   return Math.max(baseProgress, Math.floor(firstEarlySkip.end * 1e3) + 1e3);
 }

@@ -362,6 +362,8 @@ def check_bsbsb_module() -> list[Issue]:
 
     script_checks = [
         ("parseSurgeArgument", "script should tolerate older backslash-escaped Surge argument JSON instead of repeatedly logging JSON parse errors"),
+        ("countRawSegments", "script should log raw and parsed bsbsb segment counts for field debugging"),
+        ("shouldIncludeSummaryDanmaku", "script should inject summary on the first segment or the segment containing the first actionable marker"),
         ("bsbsb.top/api/skipSegments", "script should fetch BilibiliSponsorBlock skipSegments API"),
         ("categories=", "script should support multi-category queries instead of sponsor-only mode"),
         ("User-Agent", "script should set a browser-like User-Agent for bsbsb Cloudflare compatibility"),
@@ -424,7 +426,7 @@ def check_bsbsb_module() -> list[Issue]:
         ("idStr: summaryId", "summary danmaku idStr should stay numeric, not a custom label"),
         ("attr: 1310724", "summary danmaku should reuse the known-visible airborne attr"),
         ('extra: ""', "summary danmaku should avoid custom extra metadata that may be filtered by the client"),
-        ("chooseSummaryProgressMs(segments, options)", "summary danmaku should use delayed timing logic instead of a fixed too-early timestamp"),
+        ("chooseSummaryProgressMs(segments, options, segmentIndex)", "summary danmaku should use segment-aware delayed timing instead of a fixed too-early timestamp"),
         ("action: `airborne:${progress}`", "summary danmaku should use a self-target airborne action so Bilibili shows it through the same visible path as working airborne prompts"),
     ]
     for needle, message in summary_field_needles:
