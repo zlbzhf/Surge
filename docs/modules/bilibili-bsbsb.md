@@ -4,13 +4,13 @@
 
 - 模块：`modules/bilibili-bsbsb.sgmodule`
 - 脚本：`modules/scripts/bilibili-bsbsb.airborne.js`
-- 稳定默认模块只保留 `DmSegMobile` 请求脚本：不再默认启用 `DmView` / `ViewProgress` 响应重写，避免 parse / rewrap B 站 protobuf 响应导致原生弹幕层不可见
+- 稳定默认路径只启用 `DmSegMobile` 请求脚本；`ViewProgress` / Chronos 响应 hook 通过“自动跳”参数默认关闭、手动开启，用来验证自动 seek 是否能在当前 B 站版本上安全恢复；仍然不匹配 `DmView`
 - 导入 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule`
 
 ## 定位
 
 - **不进主 Surge.conf**：它需要 MITM 和脚本，属于可选增强，不是公开主配置默认能力。
-- **只处理空降助手**：稳定默认模块只拦截 Bilibili App 弹幕分段接口，查询 `bsbsb.top` 的片段数据，再注入可点击空降弹幕。`DmView` / `ViewProgress` 响应重写和 `UI观测` 暂不放进默认模块，后续如需研究 Chronos 自动跳或原生卡片，改用单独实验模块。
+- **只处理空降助手**：默认只拦截 Bilibili App 弹幕分段接口，查询 `bsbsb.top` 的片段数据，再注入可点击空降弹幕。`DmView` 不再放进默认模块；`ViewProgress` / Chronos 响应重写通过“自动跳”参数默认关闭，手动开启后只用于实验恢复自动 seek。
 - **失败开放**：bsbsb API 失败、超时、Cloudflare 拦截或返回空数据时，保留原始 B 站响应，不影响播放。
 
 ## 默认行为
@@ -18,6 +18,7 @@
 默认参数偏保守：
 
 ```text
+自动跳 = #
 类别 = sponsor|selfpromo|interaction
 动作类型 = skip
 片头片尾 = 0
@@ -36,12 +37,13 @@ API策略 = DIRECT
 
 含义：
 
+- **自动跳**默认是 `#`：不启用 `ViewProgress` 响应重写，优先保证原生弹幕层。要测试自动 seek，把“自动跳”改为 `bilibili.bsbsb.airborne`；若弹幕层再次不可见，立刻改回 `#`。
 - 默认只启用广告/自我推广/互动提醒三类，避免把片头片尾等正常内容也默认跳过。
 - `intro|outro|padding|music_offtopic` 通过“片头片尾=1”额外启用。
 - `poi_highlight` 通过“高能点=1”额外启用；启用后脚本会自动追加 `poi` 动作类型。
 - **开头汇总弹幕**默认关闭：现场反馈表明额外注入多条汇总弹幕可能导致 B 站客户端整层弹幕不可见，因此默认不再注入汇总弹幕，只保留普通空降/自动跳弹幕。若手动开启，脚本会优先读取 `DmSegMobile` 请求里的实际播放窗口 `ps` / `pe`，按“当前进入播放位置 + 汇总弹幕毫秒”（默认 3000ms）计算出现时间；如果请求里没有播放窗口，才回退到弹幕分段开头约 3000ms。
 - **系统通知**默认关闭：如需 Surge 系统弹窗，把“系统通知=1”；通知带“通知冷却”（默认 30 分钟），避免同一视频反复弹出。
-- **响应重写默认关闭**：稳定默认模块不再包含 `type=http-response`，不会重写 `DmView` 或 `ViewProgress`。这会暂时牺牲 Chronos 自动跳能力，只保留可点击空降提示，以优先保证 B 站原生弹幕层正常显示。
+- **响应重写默认关闭**：模块包含 `ViewProgress` 响应 hook，但由“自动跳”参数控制，默认 `#` 时脚本会失败开放、不改响应。手动把“自动跳”改为 `bilibili.bsbsb.airborne` 后才会替换 Chronos 以实验自动 seek；该 hook 不匹配 `DmView`。
 - 片段太短会被过滤，相邻/重叠片段会被合并，避免弹幕列表被污染。
 
 ## 自动跳机制
@@ -51,7 +53,7 @@ Sparkle 能自动跳过 skip 片段，并不是因为模块自己调用播放器
 1. `DmSegMobile` 请求脚本注入一条特殊空降弹幕；
 2. `ViewProgress` 响应脚本把 Bilibili 下发的 Chronos 运行包替换为 Sparkle 维护的可识别空降助手版本。
 
-现场反馈显示，B 站客户端可能因为 `ViewProgress` / `DmView` 这类响应 protobuf 被 Surge 脚本 parse / rewrap 而隐藏原生弹幕层。为保证稳定默认模块不破坏弹幕显示，当前默认模块已移除第 2 条链路，只保留可点击空降弹幕；因此默认状态下不承诺自动 seek。Chronos 自动跳后续需要在单独实验模块里二分验证，不再混入稳定默认模块。
+现场反馈显示，B 站客户端可能因为 `ViewProgress` / `DmView` 这类响应 protobuf 被 Surge 脚本 parse / rewrap 而隐藏原生弹幕层。为保证默认状态不破坏弹幕显示，当前模块把第 2 条链路放在“自动跳”开关后面：默认 `#` 时不替换 Chronos，只保留可点击空降弹幕；把“自动跳”改为 `bilibili.bsbsb.airborne` 后，才会实验开启 `ViewProgress` Chronos 替换并尝试自动 seek。
 
 Chronos 自动跳识别的特殊空降弹幕是：
 
@@ -79,19 +81,18 @@ action = "airborne:<目标毫秒>"
 
 ## 响应重写与原生卡片 Spike
 
-稳定默认模块不再启用 `UI观测`、`DmView` 或 `ViewProgress` 响应 hook。原因是现场反馈已经证明：即使脚本只读解析并重新序列化 B 站响应 protobuf，不做字段注入，也可能让客户端原生弹幕层不可见。
+默认状态不启用 `UI观测`，也不匹配 `DmView`。`ViewProgress` 响应 hook 保留在模块里，但由“自动跳”参数控制：
 
-后续如果继续研究 Chronos 自动跳或 B 站原生互动卡片，需要另建单独实验模块，逐个打开：
+- `自动跳 = #`：默认，脚本看到 response hook 也会失败开放，不解析/重写 `ViewProgress`；
+- `自动跳 = bilibili.bsbsb.airborne`：实验开启 Chronos 替换，尝试让 `空指部已就位` 自动 seek。
 
-1. 只匹配 `ViewProgress`，验证 Chronos 替换是否单独破坏弹幕层；
-2. 只匹配 `DmView`，验证只读观测是否单独破坏弹幕层；
-3. 只在真实样本确认字段后，再实验 `CommandDm` / `ContractCard` / `OperationCard`。
+这样可以让老板在同一个模块里快速开关自动跳，同时保留安全回退路径。若开启自动跳后原生弹幕层再次不可见，直接把“自动跳”改回 `#`，不用删除整条模块。
 
-这些实验不再进入稳定默认模块。
+`DmView` 原生卡片、`CommandDm` / `ContractCard` / `OperationCard` 注入仍不进入默认模块，后续只能另建单独实验模块验证。
 
 ## MITM 范围
 
-模块只追加两个必要 hostname，当前稳定默认模块只用于 `DmSegMobile` 注入；保留 `app.bilibili.com` 是为了兼容 B 站 App 在不同入口下的同名弹幕分段接口，不再默认用于 `DmView` / `ViewProgress` 响应重写：
+模块只追加两个必要 hostname，当前默认路径用于 `DmSegMobile` 注入；保留 `app.bilibili.com` 是为了兼容 B 站 App 在不同入口下的同名弹幕分段接口，以及在“自动跳”开启时匹配 `ViewProgress`。默认仍不匹配 `DmView`：
 
 ```ini
 hostname = %APPEND% grpc.biliapi.net, app.bilibili.com
