@@ -36,6 +36,23 @@ API策略 = DIRECT
 - `poi_highlight` 通过“高能点=1”额外启用；启用后脚本会自动追加 `poi` 动作类型。
 - 片段太短会被过滤，相邻/重叠片段会被合并，避免弹幕列表被污染。
 
+## 自动跳机制
+
+Sparkle 能自动跳过 skip 片段，并不是因为模块自己调用播放器 API，而是因为 Bilibili App 内置的 Chronos 弹幕逻辑会识别一条特殊空降弹幕：
+
+```text
+content = "空指部已就位"
+action = "airborne:<目标毫秒>"
+```
+
+因此本模块对 `skip` 片段必须保留这条**精确文案**：`空指部已就位`。不要在 `content` 后追加“恰饭广告已标记”等分类说明，否则 Chronos 的精确字符串判断会失效，只剩手动点击空降。
+
+当前实现约定：
+
+- `skip` 片段：`content` 固定为 `空指部已就位`，用于触发 Chronos 自动跳。
+- 分类信息：写入 `extra` JSON（`category` / `categoryLabel` / `actionType` / `UUID`），不污染自动跳文案。
+- `poi_highlight` 高能点：不使用 `空指部已就位`，显示分类标签并保持手动空降提示，避免被误当作 skip 自动跳。
+
 ## MITM 范围
 
 模块只追加两个必要 hostname：

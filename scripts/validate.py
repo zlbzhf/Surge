@@ -317,6 +317,11 @@ def check_bsbsb_module() -> list[Issue]:
 
     module_text = BSBSB_MODULE.read_text(encoding="utf-8")
     script_text = BSBSB_SCRIPT.read_text(encoding="utf-8")
+    script_search_text = re.sub(
+        r"\\u([0-9A-Fa-f]{4})",
+        lambda match: chr(int(match.group(1), 16)),
+        script_text,
+    ).replace(r"\xB7", "·")
     doc_text = BSBSB_DOC.read_text(encoding="utf-8")
 
     module_checks = [
@@ -367,11 +372,37 @@ def check_bsbsb_module() -> list[Issue]:
         if needle in script_text:
             issues.append(Issue(BSBSB_SCRIPT, 1, message))
 
+    if "空指部已就位 ·" in script_search_text:
+        issues.append(
+            Issue(
+                BSBSB_SCRIPT,
+                1,
+                "skip danmaku content must stay exactly '空指部已就位' so Bilibili Chronos can auto-seek",
+            )
+        )
+    exact_skip_needles = (
+        'segment.actionType === "skip" ? "空指部已就位"',
+        "segment.actionType === 'skip' ? '空指部已就位'",
+    )
+    if not any(needle in script_search_text for needle in exact_skip_needles):
+        issues.append(
+            Issue(
+                BSBSB_SCRIPT,
+                1,
+                "script should explicitly keep skip content as exact '空指部已就位' and put category metadata elsewhere",
+            )
+        )
+    if "categoryLabel" not in script_text:
+        issues.append(Issue(BSBSB_SCRIPT, 1, "script should keep category label metadata in extra JSON / POI display text"))
+
     doc_checks = [
         ("MITM", "docs should disclose MITM requirement"),
         ("bsbsb.top", "docs should name the external API/data source"),
         ("sponsor|selfpromo|interaction", "docs should document the default category set"),
         ("不进主 Surge.conf", "docs should state this remains optional, not default"),
+        ("自动跳", "docs should document the Bilibili Chronos auto-seek behavior"),
+        ("精确文案", "docs should document the exact content constraint for auto-seek"),
+        ("空指部已就位", "docs should document the exact skip danmaku content"),
         ("GPL-3.0-or-later", "docs should preserve GPL license attribution"),
         ("kokoryh/Sparkle", "docs should attribute Sparkle"),
         ("hanydd/BilibiliSponsorBlock", "docs should attribute BilibiliSponsorBlock"),

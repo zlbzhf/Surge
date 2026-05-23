@@ -4480,6 +4480,8 @@ function createAirborneDanmaku(segments, options) {
     const id = String(index + 1);
     const target = Math.floor(segment.end * 1e3);
     const progress = segment.actionType === "poi" ? Math.max(0, Math.floor(segment.start * 1e3) - options.offsetMs) : Math.floor(segment.start * 1e3) + options.offsetMs;
+    const categoryLabel = CATEGORY_LABELS[segment.category] || "\u7247\u6BB5\u5DF2\u6807\u8BB0";
+    const content = segment.actionType === "skip" ? "\u7A7A\u6307\u90E8\u5DF2\u5C31\u4F4D" : categoryLabel;
     return {
       id,
       progress,
@@ -4487,7 +4489,7 @@ function createAirborneDanmaku(segments, options) {
       fontsize: 50,
       color: 16777215,
       midHash: "1948dd5d",
-      content: `\u7A7A\u6307\u90E8\u5DF2\u5C31\u4F4D \xB7 ${CATEGORY_LABELS[segment.category] || "\u7247\u6BB5\u5DF2\u6807\u8BB0"}`,
+      content,
       ctime: "1735660800",
       weight: 11,
       action: `airborne:${target}`,
@@ -4495,7 +4497,7 @@ function createAirborneDanmaku(segments, options) {
       idStr: id,
       attr: 1310724,
       animation: "",
-      extra: JSON.stringify({ category: segment.category, actionType: segment.actionType, UUID: segment.UUID || "" }),
+      extra: JSON.stringify({ category: segment.category, categoryLabel, actionType: segment.actionType, UUID: segment.UUID || "" }),
       colorful: 0 /* NONE_TYPE */,
       type: 1,
       oid: "212364987",

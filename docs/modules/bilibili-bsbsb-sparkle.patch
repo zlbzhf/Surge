@@ -239,6 +239,8 @@ index 4e9ba08..74da6e5 100644
 +            segment.actionType === 'poi'
 +                ? Math.max(0, Math.floor(segment.start * 1000) - options.offsetMs)
 +                : Math.floor(segment.start * 1000) + options.offsetMs;
++        const categoryLabel = CATEGORY_LABELS[segment.category] || '片段已标记';
++        const content = segment.actionType === 'skip' ? '空指部已就位' : categoryLabel;
          return {
              id,
 -            progress: start,
@@ -248,7 +250,7 @@ index 4e9ba08..74da6e5 100644
              color: 16777215,
              midHash: '1948dd5d',
 -            content: '空指部已就位',
-+            content: `空指部已就位 · ${CATEGORY_LABELS[segment.category] || '片段已标记'}`,
++            content,
              ctime: '1735660800',
              weight: 11,
 -            action: `airborne:${end}`,
@@ -258,7 +260,7 @@ index 4e9ba08..74da6e5 100644
              attr: 1310724,
              animation: '',
 -            extra: '',
-+            extra: JSON.stringify({ category: segment.category, actionType: segment.actionType, UUID: segment.UUID || '' }),
++            extra: JSON.stringify({ category: segment.category, categoryLabel, actionType: segment.actionType, UUID: segment.UUID || '' }),
              colorful: DmColorfulType.NONE_TYPE,
              type: 1,
              oid: '212364987',
