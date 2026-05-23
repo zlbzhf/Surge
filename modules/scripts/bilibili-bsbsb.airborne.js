@@ -4287,18 +4287,21 @@ var handleDmSegMobileReq = async (ctx2, next) => {
   let data = body[0] ? ungzip(body.subarray(5)) : body.subarray(5);
   const message = DmSegMobileReq.fromBinary(data);
   if (message.type !== 1) exit();
-  const { pid, oid } = message;
+  const { pid, oid, segmentIndex } = message;
   const videoId = toBvid(pid);
+  const options = normalizeSponsorBlockOptions(ctx2.argument);
   const [{ headers, bodyBytes, h2_trailers }, segments] = await Promise.all([
     fetchBilibili(ctx2, 1),
-    fetchSponsorBlock(ctx2, videoId, oid)
+    fetchSponsorBlock(ctx2, videoId, oid, options)
   ]);
   ctx2.response.headers = headers;
   ctx2.response.bodyBytes = bodyBytes;
   ctx2.response.h2_trailers = h2_trailers;
   if (segments.length) {
     ctx2.state.segments = segments;
-    ctx2.state.sponsorBlockOptions = normalizeSponsorBlockOptions(ctx2.argument);
+    ctx2.state.sponsorBlockOptions = options;
+    ctx2.state.includeSummaryDanmaku = options.summaryDanmaku && isFirstDanmakuSegment(segmentIndex);
+    maybeNotifySummary(ctx2, videoId, oid, segments, options);
     return next();
   }
 };
@@ -4350,6 +4353,16 @@ var CATEGORY_LABELS = {
   music_offtopic: "\u975E\u97F3\u4E50\u6BB5\u843D\u53EF\u8DF3\u8FC7",
   poi_highlight: "\u9AD8\u80FD\u70B9\u5DF2\u6807\u8BB0"
 };
+var CATEGORY_SHORT_LABELS = {
+  sponsor: "广告",
+  selfpromo: "推广",
+  interaction: "互动",
+  intro: "片头",
+  outro: "片尾",
+  padding: "空白",
+  music_offtopic: "非音乐",
+  poi_highlight: "高能"
+};
 function normalizeSponsorBlockOptions(argument) {
   const categories = new Set(parseList(argument.categories, DEFAULT_CATEGORIES));
   if (toBoolean(argument.includeIntroOutro)) INTRO_OUTRO_CATEGORIES.forEach((category) => categories.add(category));
@@ -4364,6 +4377,10 @@ function normalizeSponsorBlockOptions(argument) {
     offsetMs: toNumber(argument.offsetMs, 2e3, 0, 1e4),
     maxSegments: Math.round(toNumber(argument.maxSegments, 12, 1, 50)),
     cacheMinutes: toNumber(argument.cacheMinutes, 60, 0, 1440),
+    summaryDanmaku: argument.summaryDanmaku === void 0 ? true : toBoolean(argument.summaryDanmaku),
+    summaryDanmakuMs: Math.round(toNumber(argument.summaryDanmakuMs, 800, 0, 6e4)),
+    systemNotification: toBoolean(argument.systemNotification),
+    notificationCooldownMinutes: toNumber(argument.notificationCooldownMinutes, 30, 0, 1440),
     userAgent: argument.userAgent || DEFAULT_USER_AGENT
   };
 }
@@ -4383,8 +4400,7 @@ function toNumber(value, fallback, min, max) {
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
 }
-async function fetchSponsorBlock(ctx2, videoId, cid) {
-  const options = normalizeSponsorBlockOptions(ctx2.argument);
+async function fetchSponsorBlock(ctx2, videoId, cid, options = normalizeSponsorBlockOptions(ctx2.argument)) {
   const cacheKey = buildCacheKey(videoId, cid, options);
   const cached = readCachedSegments(ctx2, cacheKey, options.cacheMinutes);
   if (cached) return cached;
@@ -4469,12 +4485,93 @@ function mergeSegments(segments, options) {
     ...segments.filter((segment) => segment.actionType !== "skip")
   ].sort((left, right) => left.start - right.start);
 }
+function isFirstDanmakuSegment(segmentIndex) {
+  const index = Number(segmentIndex);
+  return !Number.isFinite(index) || index <= 1;
+}
+function summarizeSegments(segments) {
+  const skipSegments = segments.filter((segment) => segment.actionType === "skip");
+  const poiSegments = segments.filter((segment) => segment.actionType === "poi");
+  const skipDurationSeconds = Math.round(skipSegments.reduce((total, segment) => total + Math.max(0, segment.end - segment.start), 0));
+  const categories = [...new Set(segments.map((segment) => segment.category).filter(Boolean))];
+  const parts = [];
+  if (skipSegments.length) {
+    parts.push(`自动跳过${skipSegments.length}段 / ${formatDuration(skipDurationSeconds)}`);
+  }
+  if (poiSegments.length) {
+    parts.push(`高能点${poiSegments.length}个`);
+  }
+  if (categories.length) {
+    parts.push(`类型：${categories.map((category) => CATEGORY_SHORT_LABELS[category] || category).slice(0, 4).join("/")}`);
+  }
+  return {
+    skipCount: skipSegments.length,
+    poiCount: poiSegments.length,
+    skipDurationSeconds,
+    categories,
+    content: parts.length ? `小电视空降：${parts.join("，")}` : "",
+    signature: [skipSegments.length, skipDurationSeconds, poiSegments.length, categories.join("|")].join(":")
+  };
+}
+function formatDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  if (seconds < 60) return `${seconds}秒`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${minutes}分${rest}秒` : `${minutes}分钟`;
+}
+function maybeNotifySummary(ctx2, videoId, cid, segments, options) {
+  if (!options.systemNotification) return;
+  try {
+    const summary = summarizeSegments(segments);
+    if (!summary.content) return;
+    const cacheKey = ["bsbsb.notification.v1", videoId, cid, summary.signature].join(":");
+    const cooldownMs = options.notificationCooldownMinutes * 60 * 1e3;
+    if (cooldownMs > 0) {
+      const cached = ctx2.getJSON(cacheKey);
+      if (cached?.createdAt && Date.now() - cached.createdAt < cooldownMs) return;
+      ctx2.setJSON({ createdAt: Date.now() }, cacheKey);
+    }
+    ctx2.notify("BilibiliSponsorBlock", "发现空降/高能片段", summary.content, { dismiss: true, sound: false });
+  } catch (e) {
+    Logger.debug("[SponsorBlock] notification failed", e);
+  }
+}
 var handleDmSegMobileReply = (ctx2, next) => {
   const message = DmSegMobileReply.fromBinary(ctx2.response.bodyBytes);
-  message.elems.push(...createAirborneDanmaku(ctx2.state.segments, ctx2.state.sponsorBlockOptions));
+  const options = ctx2.state.sponsorBlockOptions;
+  const segments = ctx2.state.segments;
+  if (ctx2.state.includeSummaryDanmaku) {
+    message.elems.push(createSummaryDanmaku(segments, options));
+  }
+  message.elems.push(...createAirborneDanmaku(segments, options));
   ctx2.response.bodyBytes = DmSegMobileReply.toBinary(message);
   return next();
 };
+function createSummaryDanmaku(segments, options) {
+  const summary = summarizeSegments(segments);
+  return {
+    id: "9000000000",
+    progress: options.summaryDanmakuMs,
+    mode: 5,
+    fontsize: 50,
+    color: 16766720,
+    midHash: "1948dd5d",
+    content: summary.content,
+    ctime: "1735660800",
+    weight: 11,
+    action: "",
+    pool: 0,
+    idStr: "bsbsb-summary",
+    attr: 0,
+    animation: "",
+    extra: JSON.stringify({ type: "bsbsb-summary", skipCount: summary.skipCount, skipDurationSeconds: summary.skipDurationSeconds, poiCount: summary.poiCount, categories: summary.categories }),
+    colorful: 0 /* NONE_TYPE */,
+    type: 1,
+    oid: "212364987",
+    dmFrom: 1
+  };
+}
 function createAirborneDanmaku(segments, options) {
   return segments.map((segment, index) => {
     const id = String(index + 1);

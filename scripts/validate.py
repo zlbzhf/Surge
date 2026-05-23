@@ -330,6 +330,14 @@ def check_bsbsb_module() -> list[Issue]:
         (BSBSB_SCRIPT_URL, "module should reference the same-repo airborne script URL"),
         ("DmSegMobile", "module should only hook the Bilibili danmaku segment endpoint"),
         ("grpc.biliapi.net, app.bilibili.com", "MITM scope should stay limited to the two required Bilibili hosts"),
+        ("汇总弹幕:1", "summary danmaku should be enabled by default"),
+        ("系统通知:0", "system notification should stay opt-in and disabled by default"),
+        ("通知冷却分钟:30", "system notification should have a default cooldown"),
+        ("汇总弹幕毫秒:800", "summary danmaku should have a configurable early display time"),
+        ("summaryDanmaku", "module should pass summaryDanmaku argument to the script"),
+        ("systemNotification", "module should pass systemNotification argument to the script"),
+        ("notificationCooldownMinutes", "module should pass notification cooldown argument to the script"),
+        ("summaryDanmakuMs", "module should pass summary danmaku timing argument to the script"),
     ]
     for needle, message in module_checks:
         if needle not in module_text:
@@ -354,6 +362,12 @@ def check_bsbsb_module() -> list[Issue]:
         ("mergeGap", "script should merge near-overlapping segments"),
         ("minDuration", "script should filter very short segments"),
         ("poi_highlight", "script should expose optional highlight/POI support"),
+        ("createSummaryDanmaku", "script should inject a non-clickable intro summary danmaku"),
+        ("summarizeSegments", "script should summarize skip/poi segment counts"),
+        ("summaryDanmakuMs", "script should support configurable summary danmaku timing"),
+        ("maybeNotifySummary", "script should support optional system notification with cooldown"),
+        ("notificationCooldownMinutes", "script should rate-limit system notifications"),
+        ("ctx2.notify(", "script should use Surge notification API only behind the opt-in notification gate"),
         ("return []", "script should fail open when bsbsb lookup fails"),
         ("SPDX-License-Identifier: GPL-3.0-or-later", "script should keep GPL SPDX license marker"),
         ("kokoryh/Sparkle", "script should retain Sparkle attribution"),
@@ -394,6 +408,8 @@ def check_bsbsb_module() -> list[Issue]:
         )
     if "categoryLabel" not in script_text:
         issues.append(Issue(BSBSB_SCRIPT, 1, "script should keep category label metadata in extra JSON / POI display text"))
+    if "action: \"\"" not in script_text:
+        issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku should be non-clickable and must not use airborne actions"))
 
     doc_checks = [
         ("MITM", "docs should disclose MITM requirement"),
@@ -403,6 +419,10 @@ def check_bsbsb_module() -> list[Issue]:
         ("自动跳", "docs should document the Bilibili Chronos auto-seek behavior"),
         ("精确文案", "docs should document the exact content constraint for auto-seek"),
         ("空指部已就位", "docs should document the exact skip danmaku content"),
+        ("开头汇总弹幕", "docs should document the intro summary danmaku feature"),
+        ("系统通知", "docs should document optional system notifications"),
+        ("默认关闭", "docs should state system notification is disabled by default"),
+        ("通知冷却", "docs should document notification cooldown behavior"),
         ("GPL-3.0-or-later", "docs should preserve GPL license attribution"),
         ("kokoryh/Sparkle", "docs should attribute Sparkle"),
         ("hanydd/BilibiliSponsorBlock", "docs should attribute BilibiliSponsorBlock"),
