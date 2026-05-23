@@ -22,6 +22,7 @@ blackmatrix7 单 App 精细控制
 - `scripts/validate.py` — 校验规则 URL、策略组引用、顺序和安全项。
 - `rules/blackmatrix7/` — 生成后的 blackmatrix7 app 规则，分为 `non_ip` / `ip`。
 - `docs/design.md` — 项目架构和规则设计说明。
+- `docs/private-nodes.md` — 私有节点配置与更新保留方案。
 - `docs/sub-store.md` — Sub-Store 节点治理建议。
 - `docs/optional-modules.md` — 可选模块和风险分层原则。
 
@@ -51,15 +52,17 @@ blackmatrix7 单 App 精细控制
 
 BiliBili 不使用大而全单 App 规则前置，保留 SukkaW 的分布式处理：国内主站直连，国际版/港澳台进入流媒体兜底。
 
-## 使用前必改
+## 私有节点配置
 
-替换 `[Proxy Group]` 中的订阅占位符：
+主配置不会保存真实订阅链接或节点密码。`✈️ 我的节点` 使用本地外部节点文件：
 
 ```ini
-✈️ 我的节点 = select, policy-path=你的订阅地址, ...
+✈️ 我的节点 = select, policy-path=proxies.txt, ...
 ```
 
-不要把真实订阅链接提交到公开仓库。
+这样更新远程 `Surge.conf` 时，只会更新规则和策略组，不会覆盖你的私有节点。
+
+你需要在 Surge 本地准备 `proxies.txt`，内容是你的节点列表或完整 Surge 节点订阅。详见 [私有节点配置](docs/private-nodes.md)。不要把真实订阅链接、节点密码或 `proxies.txt` 提交到公开仓库。
 
 ## 生成
 
@@ -92,5 +95,6 @@ python3 scripts/validate.py
 ## 文档
 
 - [设计说明](docs/design.md)
+- [私有节点配置](docs/private-nodes.md)
 - [Sub-Store 节点治理建议](docs/sub-store.md)
 - [Optional Modules 原则](docs/optional-modules.md)
