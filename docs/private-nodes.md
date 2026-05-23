@@ -12,6 +12,14 @@ Surge 官方支持 `policy-path` 从本地文件或 URL 导入外部策略。`pr
 
 重要：`proxies.txt` 不是“订阅链接清单”。如果 `policy-path=proxies.txt`，Surge 会把 `proxies.txt` 当作外部策略内容读取，文件里必须是节点定义或完整 Surge 节点订阅内容，而不是只写一行机场订阅 URL。
 
+如果你手里就是一个订阅链接，Surge 支持更直接的写法：
+
+```ini
+✈️ 我的节点 = select, policy-path=https://你的订阅链接, update-interval=86400, no-alert=0, hidden=0, include-all-proxies=0
+```
+
+但真实订阅链接不要写进公开仓库。这个写法适合放在本地个人配置、私有仓库、私有 Sub-Store 输出配置，或其他只有你能访问的配置里。
+
 ## 你需要做什么
 
 ### 方案 A：本地 `proxies.txt`，推荐给公开主配置
