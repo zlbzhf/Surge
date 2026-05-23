@@ -361,6 +361,7 @@ def check_bsbsb_module() -> list[Issue]:
             issues.append(Issue(BSBSB_MODULE, 1, message))
 
     script_checks = [
+        ("parseSurgeArgument", "script should tolerate older backslash-escaped Surge argument JSON instead of repeatedly logging JSON parse errors"),
         ("bsbsb.top/api/skipSegments", "script should fetch BilibiliSponsorBlock skipSegments API"),
         ("categories=", "script should support multi-category queries instead of sponsor-only mode"),
         ("User-Agent", "script should set a browser-like User-Agent for bsbsb Cloudflare compatibility"),
@@ -424,12 +425,13 @@ def check_bsbsb_module() -> list[Issue]:
         ("attr: 1310724", "summary danmaku should reuse the known-visible airborne attr"),
         ('extra: ""', "summary danmaku should avoid custom extra metadata that may be filtered by the client"),
         ("chooseSummaryProgressMs(segments, options)", "summary danmaku should use delayed timing logic instead of a fixed too-early timestamp"),
+        ("action: `airborne:${progress}`", "summary danmaku should use a self-target airborne action so Bilibili shows it through the same visible path as working airborne prompts"),
     ]
     for needle, message in summary_field_needles:
         if needle not in script_text:
             issues.append(Issue(BSBSB_SCRIPT, 1, message))
-    if "action: \"\"" not in script_text:
-        issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku should be non-clickable and must not use airborne actions"))
+    if "content: summary.content" not in script_text:
+        issues.append(Issue(BSBSB_SCRIPT, 1, "summary danmaku content must stay distinct from exact skip trigger text so it does not auto-seek"))
 
     doc_checks = [
         ("MITM", "docs should disclose MITM requirement"),

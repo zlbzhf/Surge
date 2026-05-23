@@ -186,7 +186,7 @@ var SurgeContext = class extends Context {
     Object.assign(this.argument, argument);
     if (typeof $argument === "string") {
       try {
-        Object.assign(this.argument, JSON.parse($argument));
+        Object.assign(this.argument, parseSurgeArgument($argument));
       } catch (e) {
         Logger.log(e);
       }
@@ -240,6 +240,18 @@ var SurgeContext = class extends Context {
     $done({ abort: true });
   }
 };
+function parseSurgeArgument(rawArgument) {
+  const raw = rawArgument.trim();
+  try {
+    return JSON.parse(raw);
+  } catch (firstError) {
+    const normalized = raw.replace(/\\"/g, '"');
+    if (normalized !== raw) {
+      return JSON.parse(normalized);
+    }
+    throw firstError;
+  }
+}
 var LoonContext = class extends SurgeContext {
   initArgument(argument) {
     super.initArgument(argument);
@@ -4551,9 +4563,10 @@ var handleDmSegMobileReply = (ctx2, next) => {
 function createSummaryDanmaku(segments, options) {
   const summary = summarizeSegments(segments);
   const summaryId = "900000";
+  const progress = chooseSummaryProgressMs(segments, options);
   return {
     id: summaryId,
-    progress: chooseSummaryProgressMs(segments, options),
+    progress,
     mode: 5,
     fontsize: 50,
     color: 16766720,
@@ -4561,7 +4574,7 @@ function createSummaryDanmaku(segments, options) {
     content: summary.content,
     ctime: "1735660800",
     weight: 11,
-    action: "",
+    action: `airborne:${progress}`,
     pool: 0,
     idStr: summaryId,
     attr: 1310724,
