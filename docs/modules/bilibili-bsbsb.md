@@ -4,13 +4,13 @@
 
 - 模块：`modules/bilibili-bsbsb.sgmodule`
 - 脚本：`modules/scripts/bilibili-bsbsb.airborne.js`
-- Chronos 响应脚本：窄范围复用 `kokoryh/Sparkle` 的 `bilibili.protobuf.response.js`，只匹配 `ViewProgress` 用于自动跳能力
+- Chronos/UI 响应脚本：同一个 `bilibili-bsbsb.airborne.js` 窄范围匹配 `ViewProgress`，保留 Chronos 自动跳补丁；可选匹配 `DmView` / `ViewProgress` 做只读 UI 观测
 - 导入 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule`
 
 ## 定位
 
 - **不进主 Surge.conf**：它需要 MITM 和脚本，属于可选增强，不是公开主配置默认能力。
-- **只处理空降助手**：拦截 Bilibili App 弹幕分段接口，查询 `bsbsb.top` 的片段数据，再注入可点击空降弹幕；同时窄范围拦截 `ViewProgress` 响应，把 Bilibili Chronos 指向 Sparkle 维护的可自动跳版本。
+- **只处理空降助手**：拦截 Bilibili App 弹幕分段接口，查询 `bsbsb.top` 的片段数据，再注入可点击空降弹幕；同时窄范围拦截 `ViewProgress` 响应，把 Bilibili Chronos 指向 Sparkle 维护的可自动跳版本。`UI观测` 开关默认关闭，开启后只读记录 `DmView` / `ViewProgress` 下发的互动弹幕与播放卡片结构，为后续实现原生卡片提示取真实样本。
 - **失败开放**：bsbsb API 失败、超时、Cloudflare 拦截或返回空数据时，保留原始 B 站响应，不影响播放。
 
 ## 默认行为
@@ -26,6 +26,7 @@
 汇总弹幕毫秒 = 3000
 系统通知 = 0
 通知冷却分钟 = 30
+UI观测 = 0
 最短片段秒数 = 5
 合并间隔秒数 = 1.5
 空降提前毫秒 = 2000
@@ -41,6 +42,7 @@ API策略 = DIRECT
 - `poi_highlight` 通过“高能点=1”额外启用；启用后脚本会自动追加 `poi` 动作类型。
 - **开头汇总弹幕**默认开启：优先在第一个弹幕分段中插入多条小字号、分行式空降卡片提示，默认约 3000ms 出现，用来提示本视频包含哪些类型、各类型数量/时长以及是否可自动跳过或手动空降。
 - **系统通知**默认关闭：如需 Surge 系统弹窗，把“系统通知=1”；通知带“通知冷却”（默认 30 分钟），避免同一视频反复弹出。
+- **UI观测**默认关闭：把“UI观测=1”后，响应脚本会只读记录 `DmView` / `ViewProgress` 里的 `command_dms`、`ContractCard`、`OperationCard`、`attention`、`post_panel` / `post_panel2` 等摘要；它不会注入卡片，也不会上传数据，用于先捕获 B 站真实原生互动卡片样本。
 - 片段太短会被过滤，相邻/重叠片段会被合并，避免弹幕列表被污染。
 
 ## 自动跳机制
@@ -76,9 +78,19 @@ action = "airborne:<目标毫秒>"
 - **通知冷却**：默认 30 分钟。脚本按 `videoId + cid + 摘要签名` 写入 `$persistentStore`，同一视频同一批片段在冷却期内不会反复通知；把“通知冷却分钟=0”可关闭冷却限制。
 - **失败开放**：汇总弹幕或通知逻辑异常时只写 debug 日志，不影响原始 B 站弹幕响应和空降弹幕注入。
 
+## UI观测与原生卡片 Spike
+
+这次没有直接猜测 B 站卡片字段，而是先加一个默认关闭的只读观测模式。开启“UI观测=1”后，脚本会在 Surge 日志输出 `[BSBSB:UI]` 摘要，范围包括：
+
+- `DmView`：`special_dms`、`activity_meta`、`command.command_dms`、`post_panel`、`post_panel2`、`qoe` 字节长度。
+- `ViewProgress`：`video_guide.contract_card`（ContractCard）、`dm.command_dms`、`dm.cards`（OperationCard）、`dm.attention`、Chronos md5/file 摘要。
+- `iPad ViewProgress`：`video_guide` 字节长度与 Chronos 摘要。
+
+这些字段来自 `bilibili-API-collect` 的 `dm.proto` / `viewunite.proto`，也是后续实现 B 站原生互动卡片显示的候选入口。当前版本只观测，不构造或注入 `ContractCard` / `OperationCard`，避免在没有真实样本时破坏播放页 UI。日志只输出紧凑摘要和截断文案，不 dump 整个 protobuf body。
+
 ## MITM 范围
 
-模块只追加两个必要 hostname，分别用于 `DmSegMobile` 注入和 `ViewProgress` Chronos 替换：
+模块只追加两个必要 hostname，分别用于 `DmSegMobile` 注入、`DmView` UI 观测和 `ViewProgress` Chronos 替换/UI 观测：
 
 ```ini
 hostname = %APPEND% grpc.biliapi.net, app.bilibili.com
@@ -154,6 +166,7 @@ bsbsb.top 有 Cloudflare 防护；请求头会显式设置：
 - **想看高能点**：开启“高能点=1”。
 - **不想看到开头汇总**：把“开头汇总弹幕=0”。
 - **想要系统弹窗**：把“系统通知=1”，必要时调整“通知冷却分钟”。
+- **想抓原生卡片样本**：临时把“UI观测=1”并把“日志等级”调到 `3` 或更低，打开带互动卡片/关注引导/运营卡片的视频后查看 `[BSBSB:UI]` 日志；抓完建议关回 `0`。
 - **空降弹幕太多**：降低“最大注入数”或提高“最短片段秒数”。
 - **bsbsb 查询频繁**：提高“缓存分钟”。
 
