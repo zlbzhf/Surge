@@ -4,6 +4,7 @@
 Checks are intentionally practical for a public daily-driver config:
 - active remote rule URLs resolve, while same-repo raw URLs map to local files;
 - rule policy targets exist as proxy groups or Surge built-ins;
+- proxy groups do not reference missing or stale/unused policy groups;
 - rule ordering preserves domainset -> non_ip -> ip -> FINAL;
 - generated blackmatrix7 split rules are referenced instead of mixed upstream lists;
 - high-risk public-profile settings and obvious secrets are not active.
@@ -26,6 +27,9 @@ from generate import load_sources  # noqa: E402
 CONFIG_FILES = [ROOT / "Surge.conf"]
 BUILTIN_POLICIES = {"DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP"}
 BLACKMATRIX7_MIXED_PREFIX = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Surge/"
+FORBIDDEN_ACTIVE_GROUPS = {
+    "BiliBili": "BiliBili should stay handled by SukkaW domestic/stream rules, not as an independent active policy group",
+}
 
 
 @dataclass
@@ -38,6 +42,13 @@ class Issue:
     def format(self) -> str:
         rel = self.path.relative_to(ROOT) if self.path.is_absolute() and self.path.is_relative_to(ROOT) else self.path
         return f"::{self.level} file={rel},line={self.line}::{self.message}"
+
+
+@dataclass(frozen=True)
+class GroupDef:
+    name: str
+    line: int
+    rhs: str
 
 
 def section(text: str, name: str) -> tuple[int, list[str]]:
@@ -62,13 +73,15 @@ def active(line: str) -> bool:
     return bool(stripped) and not stripped.startswith("#")
 
 
-def parse_groups(text: str) -> set[str]:
-    _, lines = section(text, "Proxy Group")
-    groups: set[str] = set()
-    for line in lines:
+def parse_group_definitions(text: str) -> dict[str, GroupDef]:
+    start_line, lines = section(text, "Proxy Group")
+    groups: dict[str, GroupDef] = {}
+    for offset, line in enumerate(lines):
         if not active(line) or "=" not in line:
             continue
-        groups.add(line.split("=", 1)[0].strip())
+        name, rhs = line.split("=", 1)
+        name = name.strip()
+        groups[name] = GroupDef(name=name, line=start_line + offset, rhs=rhs.strip())
     return groups
 
 
@@ -167,14 +180,56 @@ def check_urls(path: Path, rules: list[tuple[int, str, list[str]]], skip_network
     return issues
 
 
-def check_policies(path: Path, text: str, rules: list[tuple[int, str, list[str]]]) -> list[Issue]:
-    groups = parse_groups(text)
-    valid = groups | BUILTIN_POLICIES
+def group_references(group: GroupDef) -> list[tuple[str, str]]:
+    """Return policy-group references inside a Proxy Group RHS.
+
+    Surge group lines are comma separated. The first field is the group type
+    (`select`, `smart`, etc.). Later bare fields are policy members; most
+    `key=value` fields are parameters, except `include-other-group`, which is a
+    policy-group reference.
+    """
+    parts = [part.strip() for part in group.rhs.split(",")]
+    refs: list[tuple[str, str]] = []
+    for token in parts[1:]:
+        if not token:
+            continue
+        if "=" in token:
+            key, value = token.split("=", 1)
+            if key.strip() == "include-other-group":
+                refs.append((value.strip(), "include-other-group"))
+            continue
+        refs.append((token, "member"))
+    return refs
+
+
+def check_group_graph(path: Path, text: str, rules: list[tuple[int, str, list[str]]]) -> list[Issue]:
+    groups = parse_group_definitions(text)
+    valid = set(groups) | BUILTIN_POLICIES
+    referenced: set[str] = set()
     issues: list[Issue] = []
+
     for line_no, _line, parts in rules:
         policy = rule_policy(parts)
-        if policy and policy not in valid:
+        if policy in groups:
+            referenced.add(policy)
+        elif policy and policy not in valid:
             issues.append(Issue(path, line_no, f"rule targets missing policy group: {policy}"))
+
+    for group in groups.values():
+        for ref, kind in group_references(group):
+            if ref in groups:
+                referenced.add(ref)
+            elif ref not in BUILTIN_POLICIES:
+                issues.append(Issue(path, group.line, f"proxy group {group.name} references missing {kind}: {ref}"))
+
+    for name, message in FORBIDDEN_ACTIVE_GROUPS.items():
+        if name in groups:
+            issues.append(Issue(path, groups[name].line, message))
+
+    for group in groups.values():
+        if group.name not in referenced:
+            issues.append(Issue(path, group.line, f"policy group is not referenced by any active rule or proxy group: {group.name}"))
+
     return issues
 
 
@@ -248,7 +303,7 @@ def validate(skip_network: bool = False) -> int:
     for path in CONFIG_FILES:
         text = path.read_text(encoding="utf-8")
         rules = parse_rules(path)
-        issues.extend(check_policies(path, text, rules))
+        issues.extend(check_group_graph(path, text, rules))
         issues.extend(check_order(path, rules))
         issues.extend(check_blackmatrix7_split(path, text, rules))
         issues.extend(check_security(path, text))

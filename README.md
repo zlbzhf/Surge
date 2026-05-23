@@ -87,6 +87,7 @@ python3 scripts/validate.py
 - 活跃规则 URL 可达性。
 - 同仓库 raw URL 是否映射到本地生成文件。
 - 策略组引用是否存在。
+- 是否存在未被规则或其他策略组引用的残留策略组。
 - 规则顺序是否满足 `domainset -> non_ip -> ip -> FINAL`。
 - blackmatrix7 是否已拆分为本地 `non_ip` / `ip` 列表。
 - 是否误提交订阅链接、MITM CA、代理凭据等敏感内容。
