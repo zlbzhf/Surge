@@ -35,7 +35,7 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture
 - 通用 `file-capture.sgmodule` 不追加 `[MITM] hostname`。
 - 主捕获脚本使用 `requires-body=false,max-size=0`，只看 URL 和响应头，不读取图片/PDF/二进制 body。
 - 脚本不修改 HTTP 响应；异常时失败开放，原响应继续返回。
-- 记录里默认 `QUERY=redact`，会脱敏 `token`、`sign`、`key`、`session` 等查询参数。
+- 记录里默认 `query=redact`，会脱敏 `token`、`sign`、`key`、`session` 等查询参数。
 - 记录有数量上限并按 URL/类型/大小去重。
 - 可选归档 webhook 只发送新捕获项的元数据；Surge 端仍不读取二进制 body。
 - 归档服务下载文件时默认要求 token、建议 host allowlist，并阻止内网/回环地址，避免 SSRF。
@@ -97,11 +97,11 @@ python3 tools/file-archive-server.py \
   --token '换成强随机token'
 ```
 
-然后在模块参数里填写（模块参数使用英文小写键名，兼容 Surge iOS/Mac 参数编辑器）：
+然后在 Surge 的模块参数编辑器里填写这两个字段。模块参数使用 Surge 官方 query-string 声明，并用 `%key%` 占位，脚本 URL 是硬编码的外部脚本地址：
 
 ```text
-archive_url: https://你的域名/archive
-archive_token: 换成强随机token
+archive_url = https://你的域名/archive
+archive_token = 换成强随机token
 ```
 
 保存后的目录示例：
@@ -131,7 +131,7 @@ archive_token: 换成强随机token
 
 ## 参数
 
-通用版主要参数（Surge 参数表使用英文小写键名）：
+通用版主要参数（Surge 参数表使用英文小写键名，模块头部为 `#!arguments=keep=120&...`）：
 
 - `keep`：默认 120，最多 800。
 - `notify`：默认 0；设为 1 后捕获文件时发系统通知。

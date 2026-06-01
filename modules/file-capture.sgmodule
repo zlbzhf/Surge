@@ -1,11 +1,11 @@
 #!name=文件捕获 / File Capture
 #!desc=识别 HTTP/HTTPS 响应中的图片、PDF、视频、音频、压缩包、Office 文件；记录最近文件清单并提供 CSV 导出。默认不读取二进制 body、不修改响应。HTTPS 需要目标域名已启用 MITM。
 #!category=Utility
-#!arguments=keep:120,notify:0,min_bytes:0,kinds:image|pdf|archive|video|audio|office|binary,query:redact,archive_url:,archive_token:
+#!arguments=keep=120&notify=0&min_bytes=0&kinds=image%7Cpdf%7Carchive%7Cvideo%7Caudio%7Coffice%7Cbinary&query=redact&archive_url=&archive_token=
 #!arguments-desc=keep\n- 默认 120，最多 800。\n\nnotify\n- 0: 默认关闭系统通知\n- 1: 每捕获一个文件弹通知\n\nmin_bytes\n- 默认 0；例如设为 10240 可忽略小图标。\n\nkinds\n- 默认 image|pdf|archive|video|audio|office|binary\n- 用竖线分隔，避免 Surge 模块参数逗号歧义。\n\nquery\n- redact: 记录里脱敏 token/sign/key/session 等参数\n- strip: 去掉全部查询参数\n- keep: 保留查询参数，不建议公开分享导出结果。\n\narchive_url\n- 可选；填你的归档服务 POST 地址后，捕获到的新文件会发送元数据，由服务端下载保存。\n\narchive_token\n- 可选；发送为 Authorization: Bearer ***
 
 [Script]
-file.capture.response = type=http-response,pattern=^https?:\/\/.+,requires-body=false,max-size=0,timeout=5,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js,argument=mode=capture&keep={{{keep}}}&notify={{{notify}}}&min_bytes={{{min_bytes}}}&kinds={{{kinds}}}&query={{{query}}}&archive_url={{{archive_url}}}&archive_token={{{archive_token}}}
+file.capture.response = type=http-response,pattern=^https?:\/\/.+,requires-body=false,max-size=0,timeout=5,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js,argument=mode=capture&keep=%keep%&notify=%notify%&min_bytes=%min_bytes%&kinds=%kinds%&query=%query%&archive_url=%archive_url%&archive_token=%archive_token%
 file.capture.panel = type=generic,timeout=5,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js,argument=mode=panel
 file.capture.export = type=generic,timeout=5,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js,argument=mode=export&limit=40
 file.capture.clear = type=generic,timeout=5,script-path=https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js,argument=mode=clear&context=true

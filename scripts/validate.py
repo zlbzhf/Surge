@@ -536,10 +536,10 @@ def check_file_capture_modules() -> list[Issue]:
         ("script-path=" + FILE_CAPTURE_SCRIPT_URL, "generic module should hard-code the script URL so the first editable parameter is not a script resource"),
         ("requires-body=false,max-size=0", "generic capture must stay metadata-only and not read binary response bodies"),
         ("file.capture.export", "generic module should expose a CSV export panel"),
-        ("#!arguments=keep:120", "generic module should use Surge-compatible colon argument syntax"),
-        ("query:redact", "generic module should default to query redaction"),
-        ("archive_url:", "generic module should expose optional archive webhook configuration"),
-        ("archive_url={{{archive_url}}}", "generic capture hook should forward archive webhook argument"),
+        ("#!arguments=keep=120&notify=0&min_bytes=0", "generic module should use Surge official query-string argument syntax"),
+        ("query=redact", "generic module should default to query redaction"),
+        ("archive_url=&archive_token=", "generic module should expose optional archive webhook configuration"),
+        ("archive_url=%archive_url%", "generic capture hook should forward archive webhook argument"),
     ]
     for needle, message in generic_checks:
         if needle not in generic_text:
@@ -558,9 +558,9 @@ def check_file_capture_modules() -> list[Issue]:
         ("requires-body=1,max-size=1048576", "AIA context hook should cap text/API body reads at 1MB"),
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "AIA MITM scope should stay limited to the three AIA hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
-        ("#!arguments=keep:160", "AIA module should use Surge-compatible colon argument syntax"),
-        ("archive_url:", "AIA module should expose optional archive webhook configuration"),
-        ("archive_url={{{archive_url}}}", "AIA hooks should forward archive webhook argument"),
+        ("#!arguments=keep=160&keep_context=60&notify=1", "AIA module should use Surge official query-string argument syntax"),
+        ("archive_url=&archive_token=", "AIA module should expose optional archive webhook configuration"),
+        ("archive_url=%archive_url%", "AIA hooks should forward archive webhook argument"),
     ]
     for needle, message in aia_checks:
         if needle not in aia_text:
@@ -575,7 +575,7 @@ def check_file_capture_modules() -> list[Issue]:
         for needle, message in forbidden_module_needles:
             if needle in text:
                 issues.append(Issue(path, 1, message))
-        for needle in ("script_url", "SCRIPT_URL", "%SCRIPT_URL%", "#!arguments=脚本URL:", "{{{脚本URL}}}", "{{{归档Webhook}}}"):
+        for needle in ("script_url", "SCRIPT_URL", "%SCRIPT_URL%", "#!arguments=脚本URL:", "{{{", "}}}", "{{{脚本URL}}}", "{{{归档Webhook}}}"):
             if needle in text:
                 issues.append(Issue(path, 1, "file-capture modules must not make script URL editable or use incompatible placeholder syntax"))
 
@@ -628,7 +628,7 @@ def check_file_capture_modules() -> list[Issue]:
         ("不进入主 `Surge.conf` 默认启用", "docs should state file-capture modules are optional"),
         ("requires-body=false,max-size=0", "docs should disclose metadata-only binary handling"),
         ("www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "docs should disclose AIA MITM scope"),
-        ("QUERY=redact", "docs should document query redaction"),
+        ("query=redact", "docs should document query redaction"),
         ("CSV", "docs should document CSV export"),
         ("归档 webhook", "docs should document server-side file archiving"),
         ("FILE_ARCHIVE_TOKEN", "docs should document archive service token configuration"),
