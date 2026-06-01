@@ -28,6 +28,7 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture
 - 把最近捕获结果放到 Surge 面板里查看。
 - 通过导出面板复制 CSV 文本，继续做产品资料索引。
 - 可选：把新捕获文件发送到自建归档 webhook，由 VPS/电脑下载文件并按产品整理成目录。
+- 如果产品页只是罗列“宣传彩页、产品条款、产品合同”等入口链接，AIA 专用版可把产品页提交给归档服务，由 VPS 抓取入口页并提取最终文件。
 - 浏览 AIA 友邦页面时，把随机 PDF/图片 URL 尽量关联到产品名和资料类型。
 
 ## 安全边界
@@ -55,10 +56,11 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn
    - 对 AIA 三个域的图片/PDF/Office/压缩包响应，只读取 URL 和响应头。
    - 如果近期已浏览产品页/API，会把文件关联到最近产品上下文。
 
-2. **产品上下文捕获**
+2. **产品上下文与产品页捕获**
    - 只对 AIA 的非文件页面/API 读取最多 1MB 文本 body。
    - 用于识别产品名、产品代码、产品状态、产品组。
    - 如果 API 内出现公开披露资料字段，会自动补全官网 PDF URL。
+   - 如果页面内出现宣传彩页、产品条款、产品合同等入口链接，会把产品页 URL 提交给归档服务；服务端抓取该页及一层入口页，提取最终 PDF/图片/Office 文件并按资料类型归档。
 
 支持的 AIA 资料字段：
 
@@ -117,7 +119,11 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
   index.csv
   index.jsonl
   友邦某某保险/
+    宣传彩页/
+      xxx.pdf
     产品条款/
+      xxx.pdf
+    产品合同/
       xxx.pdf
     费率表/
       xxx.pdf
@@ -147,7 +153,7 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
 - `archive_url`：可选；填归档服务地址后，新文件元数据会 POST 到服务端下载保存。
 - `archive_token`：可选；作为 Bearer token 发送。
 
-AIA 专用版当前不暴露额外参数；固定使用安全默认值：`keep=160`、`keep_context=60`、`notify=1`、`context_notify=0`、`harvest_links=1`、`query=redact`。
+AIA 专用版当前不暴露额外参数；固定使用安全默认值：`keep=160`、`keep_context=60`、`notify=1`、`context_notify=0`、`harvest_links=1`、`archive_page=1`、`query=redact`。
 
 ## 非目标
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import html
 import http.server
 import ipaddress
 import json
@@ -29,6 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +53,13 @@ SECRET_QUERY_KEYS = re.compile(
     r"(^|_|-|\.)(token|access_token|auth|authorization|session|sid|password|passwd|pwd|secret|key|api_key|apikey|signature|sign|ticket|code|openid|unionid)(_|-|\.|$)",
     re.I,
 )
+FILE_EXTENSIONS = {
+    "pdf", "jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "heif", "svg", "bmp", "tiff",
+    "mp4", "mov", "m4v", "mkv", "webm", "avi", "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus",
+    "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+}
+MATERIAL_HINT_RE = re.compile(r"宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|投保须知|停售|后续服务|公开披露|资料", re.I)
+TEXT_PAGE_MAX_BYTES = 2 * 1024 * 1024
 
 
 @dataclass
@@ -224,6 +233,231 @@ def redact_url(raw_url: str) -> str:
     return urllib.parse.urlunparse(parsed._replace(query=query, fragment=""))
 
 
+def is_file_url(raw_url: str) -> bool:
+    parsed = urllib.parse.urlparse(raw_url)
+    suffix = Path(urllib.parse.unquote(parsed.path)).suffix.lower().lstrip(".")
+    return suffix in FILE_EXTENSIONS
+
+
+def guess_kind_from_url(raw_url: str) -> str:
+    ext = Path(urllib.parse.unquote(urllib.parse.urlparse(raw_url).path)).suffix.lower().lstrip(".")
+    if ext == "pdf":
+        return "pdf"
+    if ext in {"jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "heif", "svg", "bmp", "tiff"}:
+        return "image"
+    if ext in {"mp4", "mov", "m4v", "mkv", "webm", "avi"}:
+        return "video"
+    if ext in {"mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"}:
+        return "audio"
+    if ext in {"zip", "rar", "7z", "tar", "gz", "bz2", "xz"}:
+        return "archive"
+    if ext in {"doc", "docx", "xls", "xlsx", "ppt", "pptx"}:
+        return "office"
+    return "binary" if ext else ""
+
+
+def infer_material_type(label: str, raw_url: str, fallback: str = "") -> str:
+    text = html.unescape(urllib.parse.unquote(f"{label} {raw_url}"))
+    if re.search(r"宣传彩页|彩页", text):
+        return "宣传彩页"
+    if re.search(r"产品合同|保险合同|合同样本", text):
+        return "产品合同"
+    if re.search(r"产品条款|保险条款|条款|terms|clause", text, re.I):
+        return "产品条款"
+    if re.search(r"费率表|费率|rate", text, re.I):
+        return "费率表"
+    if "现金价值" in text:
+        return "现金价值全表"
+    if re.search(r"产品说明书|产品说明|说明书|brochure", text, re.I):
+        return "产品说明书/产品说明"
+    if "投保须知" in text:
+        return "投保须知"
+    if re.search(r"停售|后续服务|follow", text, re.I):
+        return "停售时间、停售原因及后续服务措施"
+    return fallback or "文件"
+
+
+def strip_html_text(body: str) -> str:
+    text = re.sub(r"<script[\s\S]*?</script>", " ", body, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def infer_product_name_from_page(body: str) -> str:
+    candidates: list[str] = []
+    title_match = re.search(r"<title[^>]*>([^<]+)</title>", body, re.I)
+    if title_match:
+        candidates.append(re.sub(r"\s*[-_|].*$", "", html.unescape(title_match.group(1))).strip())
+    plain = strip_html_text(body)[:30000]
+    candidates.extend(re.findall(r"[\u4e00-\u9fffA-Za-z0-9（）()·\-]{2,80}(?:保险|寿险|年金|重疾|医疗|意外|分红)[\u4e00-\u9fffA-Za-z0-9（）()·\-]{0,40}", plain)[:12])
+    for value in candidates:
+        value = re.sub(r"^(产品名称|名称)[:：]", "", value)
+        value = re.sub(r"(宣传彩页|产品条款|产品合同|费率表|现金价值).*$", "", value).strip()
+        if re.search(r"保险|寿险|年金|重疾|医疗|意外|分红|友邦", value):
+            return value[:120]
+    return ""
+
+
+class LinkExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.links: list[dict[str, str]] = []
+        self._active_href = ""
+        self._active_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {k.lower(): v or "" for k, v in attrs}
+        raw = attr_map.get("href") or attr_map.get("src") or attr_map.get("data-src") or ""
+        if not raw:
+            return
+        if tag.lower() == "a":
+            self._active_href = raw
+            self._active_text = []
+        else:
+            self.links.append({"url": raw, "text": attr_map.get("alt") or attr_map.get("title") or ""})
+
+    def handle_data(self, data: str) -> None:
+        if self._active_href:
+            self._active_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "a" and self._active_href:
+            self.links.append({"url": self._active_href, "text": " ".join(self._active_text)})
+            self._active_href = ""
+            self._active_text = []
+
+
+def resolve_link(base_url: str, raw_link: str) -> str:
+    link = html.unescape(str(raw_link or "")).strip()
+    if not link or link.startswith(("javascript:", "mailto:", "tel:", "data:")):
+        return ""
+    return urllib.parse.urljoin(base_url, link)
+
+
+def extract_links_from_text(body: str, base_url: str) -> list[dict[str, str]]:
+    extractor = LinkExtractor()
+    try:
+        extractor.feed(body)
+    except Exception:
+        pass
+    links = extractor.links[:500]
+    for match in re.finditer(r"https?://[^\s\"'<>\\)]+", body):
+        links.append({"url": match.group(0), "text": ""})
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for link in links:
+        resolved = resolve_link(base_url, link.get("url", ""))
+        if not resolved or resolved in seen:
+            continue
+        seen.add(resolved)
+        out.append({"url": resolved, "text": re.sub(r"\s+", " ", html.unescape(link.get("text", ""))).strip()[:160]})
+    return out
+
+
+def fetch_text_page(raw_url: str, config: ArchiveConfig) -> tuple[str, str]:
+    parsed = validate_download_url(raw_url, config)
+    req = urllib.request.Request(
+        raw_url,
+        headers={
+            "User-Agent": "Surge-File-Archive/1.0 (+https://github.com/zlbzhf/Surge)",
+            "Accept": "text/html,application/json,text/plain;q=0.9,*/*;q=0.2",
+        },
+    )
+    opener = urllib.request.build_opener(SafeRedirectHandler(config))
+    with opener.open(req, timeout=config.timeout) as response:
+        final_url = response.geturl()
+        validate_download_url(final_url, config)
+        content_type = response.headers.get("Content-Type", "")
+        if re.search(r"application/(pdf|zip|octet-stream)|image/|video/|audio/", content_type, re.I):
+            raise ValueError(f"not a text page: {content_type}")
+        data = response.read(TEXT_PAGE_MAX_BYTES + 1)
+        if len(data) > TEXT_PAGE_MAX_BYTES:
+            raise ValueError(f"page too large: > {TEXT_PAGE_MAX_BYTES}")
+        charset_match = re.search(r"charset=([^;]+)", content_type, re.I)
+        charset = charset_match.group(1).strip() if charset_match else "utf-8"
+        try:
+            return data.decode(charset, errors="replace"), final_url
+        except LookupError:
+            return data.decode("utf-8", errors="replace"), final_url
+
+
+def item_is_page(item: dict[str, Any]) -> bool:
+    kind = str(item.get("kind") or "").lower()
+    content_type = str(item.get("contentType") or item.get("content_type") or "").lower()
+    raw_url = str(item.get("downloadUrl") or item.get("download_url") or item.get("url") or "")
+    return bool(kind in {"page", "html"} or "text/html" in content_type or (raw_url and not is_file_url(raw_url) and MATERIAL_HINT_RE.search(str(item))))
+
+
+def build_crawled_file_item(source_item: dict[str, Any], file_url: str, source_page: str, label: str, inherited_material: str) -> dict[str, Any]:
+    filename = Path(urllib.parse.unquote(urllib.parse.urlparse(file_url).path)).name or "file"
+    material = infer_material_type(label, file_url, inherited_material)
+    return {
+        "productName": source_item.get("productName") or source_item.get("product_name") or "",
+        "productCode": source_item.get("productCode") or source_item.get("product_code") or "",
+        "materialType": material,
+        "kind": guess_kind_from_url(file_url),
+        "filename": filename,
+        "url": redact_url(file_url),
+        "downloadUrl": file_url,
+        "source": "page-crawl",
+        "sourceUrl": redact_url(source_page),
+    }
+
+
+def crawl_page_item(item: dict[str, Any], config: ArchiveConfig) -> list[dict[str, Any]]:
+    page_url = str(item.get("downloadUrl") or item.get("download_url") or item.get("url") or "")
+    body, final_page_url = fetch_text_page(page_url, config)
+    if not (item.get("productName") or item.get("product_name")):
+        inferred_product = infer_product_name_from_page(body)
+        if inferred_product:
+            item = dict(item)
+            item["productName"] = inferred_product
+    inherited_material = str(item.get("materialType") or item.get("material_type") or "")
+    saved: list[dict[str, Any]] = []
+    seen_files: set[str] = set()
+    seen_pages: set[str] = {final_page_url}
+    nested_pages: list[tuple[str, str]] = []
+    last_error: Exception | None = None
+
+    def download_file(file_url: str, source_page: str, label: str) -> None:
+        nonlocal last_error
+        if file_url in seen_files:
+            return
+        seen_files.add(file_url)
+        try:
+            saved.append(download_one(build_crawled_file_item(item, file_url, source_page, label, inherited_material), config))
+        except Exception as exc:
+            last_error = exc
+            print(f"page crawl download failed: {file_url}: {exc}")
+
+    for link in extract_links_from_text(body, final_page_url)[:120]:
+        url = link["url"]
+        label = link.get("text", "")
+        if is_file_url(url):
+            download_file(url, final_page_url, label)
+        elif len(nested_pages) < 30 and MATERIAL_HINT_RE.search(f"{label} {url}") and url not in seen_pages:
+            seen_pages.add(url)
+            nested_pages.append((url, label))
+
+    for nested_url, nested_label in nested_pages:
+        try:
+            nested_body, nested_final_url = fetch_text_page(nested_url, config)
+        except Exception as exc:
+            last_error = exc
+            print(f"page crawl nested page failed: {nested_url}: {exc}")
+            continue
+        for link in extract_links_from_text(nested_body, nested_final_url)[:80]:
+            if is_file_url(link["url"]):
+                download_file(link["url"], nested_final_url, link.get("text") or nested_label)
+
+    if not saved and last_error:
+        raise last_error
+    if not saved:
+        raise ValueError("page crawl found no downloadable file links")
+    return saved
+
+
 def append_indexes(config: ArchiveConfig, record: dict[str, Any]) -> None:
     config.root.mkdir(parents=True, exist_ok=True)
     csv_path = config.root / "index.csv"
@@ -356,7 +590,10 @@ class ArchiveHandler(http.server.BaseHTTPRequestHandler):
             if not isinstance(item, dict):
                 continue
             try:
-                saved.append(download_one(item, self.config))
+                if item_is_page(item):
+                    saved.extend(crawl_page_item(item, self.config))
+                else:
+                    saved.append(download_one(item, self.config))
             except Exception as exc:  # keep processing the batch
                 errors.append({
                     "filename": str(item.get("filename") or ""),
@@ -386,6 +623,14 @@ def run_self_test() -> None:
         source_dir.mkdir()
         sample = source_dir / "友邦测试条款.pdf"
         sample.write_bytes(b"%PDF-1.4\n% surge archive self test\n")
+        brochure = source_dir / "宣传彩页.pdf"
+        brochure.write_bytes(b"%PDF-1.4\n% brochure\n")
+        contract = source_dir / "产品合同.pdf"
+        contract.write_bytes(b"%PDF-1.4\n% contract\n")
+        nested_page = source_dir / "contract.html"
+        nested_page.write_text('<html><body><a href="%E4%BA%A7%E5%93%81%E5%90%88%E5%90%8C.pdf">下载保险合同</a></body></html>', encoding="utf-8")
+        product_page = source_dir / "product.html"
+        product_page.write_text('<html><head><title>友邦测试产品</title></head><body><a href="%E5%AE%A3%E4%BC%A0%E5%BD%A9%E9%A1%B5.pdf">宣传彩页</a><a href="contract.html">产品合同</a></body></html>', encoding="utf-8")
 
         class SourceHandler(http.server.SimpleHTTPRequestHandler):
             def log_message(self, format: str, *args: Any) -> None:
@@ -406,15 +651,26 @@ def run_self_test() -> None:
 
         payload = {
             "schema": "surge-file-capture.archive.v1",
-            "items": [{
-                "productName": "友邦测试产品",
-                "materialType": "产品条款",
-                "kind": "pdf",
-                "filename": "友邦测试条款.pdf",
-                "url": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(sample.name)}",
-                "downloadUrl": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(sample.name)}",
-                "source": "self-test",
-            }],
+            "items": [
+                {
+                    "productName": "友邦测试产品",
+                    "materialType": "产品条款",
+                    "kind": "pdf",
+                    "filename": "友邦测试条款.pdf",
+                    "url": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(sample.name)}",
+                    "downloadUrl": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(sample.name)}",
+                    "source": "self-test",
+                },
+                {
+                    "productName": "友邦测试产品",
+                    "materialType": "产品资料页",
+                    "kind": "page",
+                    "filename": "产品资料页",
+                    "url": f"http://127.0.0.1:{source_port}/product.html",
+                    "downloadUrl": f"http://127.0.0.1:{source_port}/product.html",
+                    "source": "self-test-page",
+                },
+            ],
         }
         req = urllib.request.Request(
             f"http://127.0.0.1:{archive_port}/archive",
@@ -427,8 +683,12 @@ def run_self_test() -> None:
         source_server.shutdown()
         archive_server.shutdown()
         expected = archive_root / "友邦测试产品" / "产品条款" / "友邦测试条款.pdf"
+        expected_brochure = archive_root / "友邦测试产品" / "宣传彩页" / "宣传彩页.pdf"
+        expected_contract = archive_root / "友邦测试产品" / "产品合同" / "产品合同.pdf"
         assert expected.exists(), expected
-        assert body["saved"] == 1, body
+        assert expected_brochure.exists(), expected_brochure
+        assert expected_contract.exists(), expected_contract
+        assert body["saved"] == 3, body
         assert (archive_root / "index.csv").exists()
         print("self-test passed")
 

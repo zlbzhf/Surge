@@ -559,7 +559,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "AIA MITM scope should stay limited to the three AIA hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
         ("archive_url=https%3A%2F%2Faia.zuiai.ggff.net%2Farchive", "AIA module should hard-code the archive endpoint to avoid multi-argument editor failures"),
-        ("?cb=aia-no-token-v1", "AIA script path should cache-bust the no-token test module URL"),
+        ("?cb=aia-page-crawl-v1", "AIA script path should cache-bust the page-crawl module URL"),
+        ("archive_page=1", "AIA context hook should submit product pages for server-side file extraction"),
     ]
     for needle, message in aia_checks:
         if needle not in aia_text:
@@ -600,6 +601,9 @@ def check_file_capture_modules() -> list[Issue]:
         ("finishAfterArchive", "script should optionally forward new captures to an archive webhook"),
         ("archive_token", "script should support bearer-token archive webhook auth"),
         ("downloadUrl", "script should send a non-persisted download URL to archive webhook"),
+        ("buildPageCrawlItem", "script should submit product material pages for server-side extraction"),
+        ("archive_page", "script should allow page-crawl submission to be toggled"),
+        ("宣传彩页", "script should classify product brochure links by anchor text"),
         ("$done({});", "script should fail open for response hooks"),
     ]
     for needle, message in script_checks:
@@ -624,6 +628,9 @@ def check_file_capture_modules() -> list[Issue]:
         ("blocked non-public address", "archive server should block private/loopback downloads by default"),
         ("index.csv", "archive server should maintain a CSV index"),
         ("index.jsonl", "archive server should maintain a JSONL index"),
+        ("crawl_page_item", "archive server should crawl submitted product pages for file links"),
+        ("HTMLParser", "archive server should parse product page links without third-party dependencies"),
+        ("page-crawl", "archive server should mark files discovered from product pages"),
         ("--self-test", "archive server should provide a local integration self-test"),
     ]
     for needle, message in archive_server_checks:
@@ -637,6 +644,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("query=redact", "docs should document query redaction"),
         ("CSV", "docs should document CSV export"),
         ("归档 webhook", "docs should document server-side file archiving"),
+        ("产品页 URL", "docs should document server-side product-page extraction"),
+        ("archive_page=1", "docs should document AIA product-page archive submission"),
         ("FILE_ARCHIVE_TOKEN", "docs should document archive service token configuration"),
         ("不保存 Cookie", "docs should state cookies/request headers are not saved"),
         ("Surge 模块本体不直接下载二进制文件", "docs should clarify download behavior"),

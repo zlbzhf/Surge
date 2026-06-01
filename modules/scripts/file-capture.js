@@ -20,6 +20,8 @@ const AIA_MATERIAL_FIELDS = [
   ['followUpService', '停售时间、停售原因及后续服务措施'],
 ];
 
+const AIA_MATERIAL_PAGE_RE = /宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|投保须知|公开披露|资料下载|相关资料/i;
+
 function parseArgs(input) {
   const out = {};
   String(input || '')
@@ -129,12 +131,27 @@ function classify(contentType, ext) {
 
 function inferMaterialType(pathname, filename, url) {
   const text = safeDecode([pathname, filename, url].join(' ')).toLowerCase();
+  if (text.indexOf('宣传彩页') >= 0 || text.indexOf('彩页') >= 0) return '宣传彩页';
+  if (text.indexOf('产品合同') >= 0 || text.indexOf('保险合同') >= 0 || text.indexOf('合同样本') >= 0) return '产品合同';
   if (/\/prem\//i.test(text) || text.indexOf('费率') >= 0 || text.indexOf('rate') >= 0) return '费率表';
   if (/\/csv\//i.test(text) || text.indexOf('现金价值') >= 0) return '现金价值全表';
   if (/\/brochure\//i.test(text) || text.indexOf('说明书') >= 0 || text.indexOf('brochure') >= 0) return '产品说明书/产品说明';
   if (text.indexOf('条款') >= 0 || text.indexOf('clause') >= 0 || text.indexOf('terms') >= 0) return '产品条款';
   if (text.indexOf('follow') >= 0 || text.indexOf('停售') >= 0) return '停售时间、停售原因及后续服务措施';
   return '';
+}
+
+function inferMaterialFromLabel(label, fallback) {
+  const text = safeDecode(String(label || '')).replace(/\s+/g, ' ');
+  if (/宣传彩页|彩页/.test(text)) return '宣传彩页';
+  if (/产品合同|保险合同|合同样本/.test(text)) return '产品合同';
+  if (/产品条款|保险条款|条款/.test(text)) return '产品条款';
+  if (/费率表|费率/.test(text)) return '费率表';
+  if (/现金价值/.test(text)) return '现金价值全表';
+  if (/产品说明书|产品说明|说明书/.test(text)) return '产品说明书/产品说明';
+  if (/投保须知/.test(text)) return '投保须知';
+  if (/停售|后续服务/.test(text)) return '停售时间、停售原因及后续服务措施';
+  return fallback || '';
 }
 
 function inferProductFromFilename(filename) {
@@ -486,31 +503,90 @@ function htmlTitle(body) {
   return safeDecode(title).replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
+function stripHtmlText(value) {
+  return safeDecode(String(value || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim());
+}
+
+function likelyMaterialPage(body, title) {
+  return AIA_MATERIAL_PAGE_RE.test([title || '', String(body || '').slice(0, 200000)].join(' '));
+}
+
+function inferProductNameFromText(body, title) {
+  const candidates = [];
+  if (title) candidates.push(String(title).replace(/\s*[-_|].*$/g, ''));
+  const plain = stripHtmlText(body).slice(0, 30000);
+  const re = /[\u4e00-\u9fffA-Za-z0-9（）()·\-]{2,80}(?:保险|寿险|年金|重疾|医疗|意外|分红)[\u4e00-\u9fffA-Za-z0-9（）()·\-]{0,40}/g;
+  let m;
+  while ((m = re.exec(plain)) && candidates.length < 12) candidates.push(m[0]);
+  for (let i = 0; i < candidates.length; i += 1) {
+    const value = candidates[i].replace(/^(产品名称|名称)[:：]/, '').replace(/(宣传彩页|产品条款|产品合同|费率表|现金价值).*$/g, '').trim();
+    if (isLikelyProductName(value)) return value.slice(0, 120);
+  }
+  return '';
+}
+
 function extractEmbeddedLinks(body, baseUrl, baseContext) {
   const out = [];
   const text = String(body || '');
   const extPattern = FILE_EXTS.join('|');
   const absolute = new RegExp(`https?:\\/\\/[^\\s"'<>\\)]+\\.(?:${extPattern})(?:\\?[^\\s"'<>\\)]*)?`, 'ig');
   const attr = new RegExp(`(?:href|src|data-src|url)=["']([^"']+\\.(?:${extPattern})(?:\\?[^"']*)?)["']`, 'ig');
+  const anchor = new RegExp(`<a\\b[^>]*href=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>`, 'ig');
   let m;
   const seen = {};
-  function add(link) {
+  function add(link, label) {
     const resolved = resolveUrl(link, baseUrl);
     if (!resolved || seen[resolved]) return;
     seen[resolved] = true;
+    const materialType = inferMaterialFromLabel(label, '');
     const item = buildFileItem(resolved, {
       source: 'embedded',
       sourceUrl: baseUrl,
       productName: baseContext.productName || '',
       productCode: baseContext.productCode || '',
+      materialType,
       pageTitle: baseContext.title || '',
       queryMode: 'redact',
     });
     if (item) out.push(item);
   }
-  while ((m = absolute.exec(text)) && out.length < 200) add(m[0]);
-  while ((m = attr.exec(text)) && out.length < 300) add(m[1]);
+  while ((m = anchor.exec(text)) && out.length < 300) add(m[1], stripHtmlText(m[2]));
+  while ((m = absolute.exec(text)) && out.length < 400) add(m[0], '');
+  while ((m = attr.exec(text)) && out.length < 500) add(m[1], '');
   return out;
+}
+
+function buildPageCrawlItem(pageUrl, baseContext) {
+  const u = safeUrl(pageUrl || '');
+  if (!u) return null;
+  const productName = baseContext.productName || (isLikelyProductName(baseContext.title) ? baseContext.title.replace(/\s*[-_|].*$/g, '') : '');
+  return {
+    ts: nowIso(),
+    kind: 'page',
+    filename: '产品资料页',
+    ext: 'html',
+    materialType: '产品资料页',
+    productName,
+    productCode: baseContext.productCode || '',
+    size: 0,
+    contentType: 'text/html',
+    status: 0,
+    host: u.host,
+    url: sanitizeUrl(pageUrl, 'redact'),
+    downloadUrl: pageUrl,
+    source: 'product-page',
+    sourceUrl: sanitizeUrl(pageUrl, 'redact'),
+    pageTitle: baseContext.title || '',
+  };
 }
 
 function resolveUrl(link, baseUrl) {
@@ -554,7 +630,7 @@ function contextCapture() {
     }
   } catch (_) {}
   if (!contexts.length && baseTitle) {
-    const titleName = isLikelyProductName(baseTitle) ? baseTitle.replace(/\s*[-_|].*$/g, '') : '';
+    const titleName = inferProductNameFromText(body, baseTitle);
     contexts.push({ ts: nowIso(), productName: titleName, productCode: '', title: baseTitle, host: base.host, root: base.root, sourceUrl: base.sourceUrl, source: 'html-title' });
   }
   if (harvestLinks) {
@@ -562,13 +638,21 @@ function contextCapture() {
     embedded = embedded.concat(extractEmbeddedLinks(body, req.url || '', current));
   }
   if (contexts.length) rememberContexts(contexts, keepContext);
-  const newEmbedded = embedded.length ? filterNewItems(embedded).map((entry) => Object.assign({}, entry, { downloadUrl: entry.url })) : [];
-  if (embedded.length) upsertItems(embedded, keep);
-  if (notify && (contexts.length || embedded.length)) {
-    const c = contexts[0] || {};
-    $notification.post('Surge 文件上下文', c.productName || c.title || '已记录页面上下文', embedded.length ? `发现 ${embedded.length} 个文件链接` : '等待后续文件响应关联', { url: req.url || '' });
+  const pageItems = [];
+  if (toBool(args.archive_page, true) && likelyMaterialPage(body, baseTitle || '')) {
+    const current = contexts[0] || { title: baseTitle, productName: '', productCode: '' };
+    const pageItem = buildPageCrawlItem(req.url || '', current);
+    if (pageItem) pageItems.push(pageItem);
   }
-  finishAfterArchive(newEmbedded, args, 'context', {});
+  const newEmbedded = embedded.length ? filterNewItems(embedded).map((entry) => Object.assign({}, entry, { downloadUrl: entry.url })) : [];
+  const newPageItems = pageItems.length ? filterNewItems(pageItems) : [];
+  if (embedded.length || pageItems.length) upsertItems(embedded.concat(pageItems), keep);
+  if (notify && (contexts.length || embedded.length || pageItems.length)) {
+    const c = contexts[0] || {};
+    const detail = embedded.length ? `发现 ${embedded.length} 个文件链接` : pageItems.length ? '已提交产品资料页抓取' : '等待后续文件响应关联';
+    $notification.post('Surge 文件上下文', c.productName || c.title || '已记录页面上下文', detail, { url: req.url || '' });
+  }
+  finishAfterArchive(newEmbedded.concat(newPageItems), args, 'context', {});
 }
 
 function panel() {
