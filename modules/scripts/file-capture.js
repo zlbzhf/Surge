@@ -185,6 +185,109 @@ function sanitizeUrl(url, queryMode) {
   return `${base}?${parts.join('&')}`.slice(0, 1500);
 }
 
+const AIA_DIAGNOSTIC_SECRET_KEYS = /(^|_|-|\.)(token|access_token|auth|authorization|session|sid|password|passwd|pwd|secret|key|api_key|apikey|signature|sign|x-crp-sign|ticket|code|openid|unionid|cookie|set-cookie|h5token|uid|uuid|utdid|did|device|idfa|account|agent|customer|phone|mobile|trace|data)(_|-|\.|$)/i;
+
+function redactDiagnosticText(value) {
+  return String(value || '')
+    .replace(/([?&#]|^)([^=&#?/]{1,60})=([^&#]*)/g, function (_, sep, key, val) {
+      if (AIA_DIAGNOSTIC_SECRET_KEYS.test(safeDecode(key))) return `${sep}${key}=[REDACTED]`;
+      return `${sep}${key}=${val.length > 160 ? val.slice(0, 80) + '…' : val}`;
+    })
+    .replace(/\b[0-9a-f]{32,}\b/gi, '[HEX_REDACTED]')
+    .replace(/\b1[3-9]\d{9}\b/g, '[PHONE_REDACTED]')
+    .slice(0, 1200);
+}
+
+function sanitizeDiagnosticUrl(url) {
+  const raw = String(url || '');
+  if (!raw) return '';
+  const parts = raw.split('#');
+  const base = redactDiagnosticText(sanitizeUrl(parts[0], 'redact'));
+  if (parts.length < 2) return base;
+  const hash = redactDiagnosticText(parts.slice(1).join('#')).slice(0, 500);
+  return `${base}#${hash}`.slice(0, 1500);
+}
+
+function queryValue(rawUrl, name) {
+  const u = safeUrl(rawUrl || '');
+  const search = u && u.search ? u.search.replace(/^\?/, '') : '';
+  if (!search) return '';
+  const parts = search.split('&');
+  for (let i = 0; i < parts.length; i += 1) {
+    const idx = parts[i].indexOf('=');
+    const key = idx >= 0 ? parts[i].slice(0, idx) : parts[i];
+    if (safeDecode(key) === name) return idx >= 0 ? safeDecode(parts[i].slice(idx + 1)) : '';
+  }
+  return '';
+}
+
+function safeBase64Decode(value) {
+  let s = String(value || '').replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  try {
+    if (typeof Buffer !== 'undefined') return Buffer.from(s, 'base64').toString('utf8');
+  } catch (_) {}
+  try {
+    if (typeof atob === 'function') {
+      const binary = atob(s);
+      try {
+        let escaped = '';
+        for (let i = 0; i < binary.length; i += 1) escaped += `%${(`00${binary.charCodeAt(i).toString(16)}`).slice(-2)}`;
+        return decodeURIComponent(escaped);
+      } catch (_) {
+        return binary;
+      }
+    }
+  } catch (_) {}
+  return '';
+}
+
+function parseSopTelemetry(rawUrl) {
+  const data = queryValue(rawUrl, 'data');
+  if (!data) return null;
+  const decoded = safeDecode(safeBase64Decode(data));
+  if (!decoded || decoded.charAt(0) !== '{') return null;
+  try {
+    const payload = JSON.parse(decoded);
+    return {
+      title: objectString(payload, ['title']),
+      eventName: objectString(payload, ['event_name', 'old_event_log_value']),
+      description: objectString(payload, ['old_event_log_description', 'sourcePage', 'subApplicationName']),
+      pageUrl: objectString(payload, ['url']),
+      productName: objectString(payload, ['policyListName', 'productName', 'productCName', 'productFullName']),
+      platformType: objectString(payload, ['platformType']),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function buildDiagnosticItem(options) {
+  const opts = options || {};
+  const u = safeUrl(opts.url || opts.sourceUrl || '');
+  const item = {
+    ts: nowIso(),
+    kind: 'diagnostic',
+    filename: String(opts.filename || 'AIA 诊断').slice(0, 220),
+    ext: 'diag',
+    materialType: opts.materialType || '诊断',
+    productName: opts.productName || '',
+    productCode: opts.productCode || '',
+    size: asInt(opts.size),
+    contentType: String(opts.contentType || '').split(';')[0].slice(0, 80),
+    status: opts.status || 0,
+    host: opts.host || (u ? u.host : ''),
+    url: sanitizeDiagnosticUrl(opts.url || opts.sourceUrl || ''),
+    source: opts.source || 'aia-diagnostic',
+    pageTitle: opts.pageTitle || '',
+  };
+  if (opts.operationType) item.operationType = String(opts.operationType).slice(0, 220);
+  if (opts.encrypted !== undefined && opts.encrypted !== null && String(opts.encrypted) !== '') item.encrypted = String(opts.encrypted).slice(0, 20);
+  if (opts.eventName) item.eventName = String(opts.eventName).slice(0, 180);
+  if (opts.detail) item.detail = redactDiagnosticText(opts.detail).slice(0, 500);
+  return item;
+}
+
 function readJsonKey(key, fallback) {
   try {
     const value = $persistentStore.read(key);
@@ -241,7 +344,7 @@ function csvEscape(value) {
 }
 
 function fingerprint(item) {
-  return [item.kind, item.size || '', item.contentType || '', item.url || '', item.productName || '', item.materialType || '', item.source || ''].join('|');
+  return [item.kind, item.size || '', item.contentType || '', item.url || '', item.productName || '', item.materialType || '', item.source || '', item.operationType || '', item.eventName || '', item.encrypted || ''].join('|');
 }
 
 function upsertItems(newItems, keep) {
@@ -655,6 +758,98 @@ function contextCapture() {
   finishAfterArchive(newEmbedded.concat(newPageItems), args, 'context', {});
 }
 
+function diagnosticCapture() {
+  const args = parseArgs(typeof $argument === 'string' ? $argument : '');
+  const keep = Math.max(1, Math.min(800, asInt(args.keep) || DEFAULT_KEEP));
+  const notify = toBool(args.notify_diag, true);
+  const req = typeof $request !== 'undefined' ? $request : {};
+  const res = typeof $response !== 'undefined' ? $response : {};
+  const responseHeaders = lowerHeaders(res.headers || {});
+  const requestHeaders = lowerHeaders(req.headers || {});
+  const contentType = String(responseHeaders['content-type'] || '').toLowerCase();
+  const contentLength = responseHeaders['content-length'] || '';
+  const u = safeUrl(req.url || '');
+  const host = u ? u.hostname : '';
+  const body = typeof res.body === 'string' ? res.body : '';
+  const operationType = requestHeaders['operation-type'] || requestHeaders['x-operation-type'] || responseHeaders['operation-type'] || '';
+  const encrypted = requestHeaders['x-mgs-encryption'] || responseHeaders['x-mgs-encryption'] || '';
+  let item = null;
+
+  if (/mpaas-mgw-fin\.cn-shanghai\.aliyuncs\.com$/i.test(host)) {
+    item = buildDiagnosticItem({
+      url: req.url || '',
+      host,
+      status: res.status || 0,
+      contentType,
+      size: contentLength,
+      materialType: 'mPaaS API',
+      source: 'aia-diagnostic-mpaas',
+      filename: `mPaaS ${operationType || 'unknown-operation'}${encrypted ? ' encrypted' : ''}`,
+      operationType,
+      encrypted: encrypted || 'unknown',
+      detail: `Operation-Type=${operationType || 'missing'}; encrypted=${encrypted || 'unknown'}; body-read=0`,
+    });
+  } else if (/sop\.aia\.com\.cn$/i.test(host)) {
+    const telemetry = parseSopTelemetry(req.url || '') || {};
+    item = buildDiagnosticItem({
+      url: req.url || '',
+      host,
+      status: res.status || 0,
+      contentType,
+      size: contentLength,
+      materialType: 'SOP 事件',
+      source: 'aia-diagnostic-sop',
+      filename: `SOP ${telemetry.eventName || telemetry.title || 'event'}`,
+      productName: telemetry.productName || '',
+      pageTitle: telemetry.title || '',
+      eventName: telemetry.eventName || '',
+      detail: [telemetry.description, telemetry.platformType, telemetry.pageUrl].filter(Boolean).join(' · '),
+    });
+  } else if (/01000001\.h5\.aia\.com$/i.test(host)) {
+    const title = htmlTitle(body);
+    const productName = inferProductNameFromText(body, title);
+    item = buildDiagnosticItem({
+      url: req.url || '',
+      host,
+      status: res.status || 0,
+      contentType,
+      size: contentLength || body.length,
+      materialType: 'H5 页面',
+      source: 'aia-diagnostic-h5',
+      filename: `H5 ${title || (u ? u.pathname : '') || 'page'}`,
+      productName,
+      pageTitle: title,
+      detail: title || productName || 'H5 page observed',
+    });
+    if (title || productName) rememberContexts([{ ts: nowIso(), productName, productCode: '', title, host, root: rootDomain(host), sourceUrl: sanitizeDiagnosticUrl(req.url || ''), source: 'aia-diagnostic-h5' }], Math.max(1, Math.min(200, asInt(args.keep_context) || DEFAULT_KEEP_CONTEXT)));
+  } else if (/^(nav-st|nav-uat)\.aia\.com\.cn$/i.test(host)) {
+    item = buildDiagnosticItem({
+      url: req.url || '',
+      host,
+      status: res.status || 0,
+      contentType,
+      size: contentLength,
+      materialType: '导航资源',
+      source: 'aia-diagnostic-nav-static',
+      filename: `NAV ${basenameFromUrl(req.url || '') || host}`,
+      detail: 'nav static/uat resource observed',
+    });
+  }
+
+  if (!item) {
+    $done({});
+    return;
+  }
+  const newItems = filterNewItems(item);
+  upsertItems(item, keep);
+  if (notify && newItems.length) {
+    const sub = item.operationType || item.productName || item.pageTitle || item.host || item.materialType;
+    const detail = [item.eventName, item.encrypted ? `encrypted=${item.encrypted}` : '', item.detail || '', item.url].filter(Boolean).join('\n').slice(0, 1800);
+    $notification.post('AIA 诊断捕获', sub || item.filename, detail, { url: req.url || item.url });
+  }
+  $done({});
+}
+
 function panel() {
   const items = readItems();
   const contexts = readContexts();
@@ -678,7 +873,7 @@ function exportPanel() {
   const args = parseArgs(typeof $argument === 'string' ? $argument : '');
   const limit = Math.max(1, Math.min(80, asInt(args.limit) || 30));
   const items = readItems().slice(0, limit);
-  const header = ['ts', 'productName', 'materialType', 'kind', 'filename', 'size', 'host', 'url', 'source'];
+  const header = ['ts', 'productName', 'materialType', 'kind', 'filename', 'size', 'host', 'operationType', 'encrypted', 'eventName', 'pageTitle', 'detail', 'url', 'source'];
   const lines = [header.join(',')].concat(items.map((item) => header.map((key) => csvEscape(item[key])).join(',')));
   $done({
     title: `文件捕获导出 ${items.length}`,
@@ -707,6 +902,7 @@ try {
   else if (args.mode === 'export') exportPanel();
   else if (args.mode === 'clear') clear();
   else if (args.mode === 'context') contextCapture();
+  else if (args.mode === 'diagnostic') diagnosticCapture();
   else capture();
 } catch (e) {
   console.log(`[File Capture] ${e && e.stack ? e.stack : e}`);

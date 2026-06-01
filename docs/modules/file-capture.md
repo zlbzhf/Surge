@@ -47,13 +47,13 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture
 `aia-file-capture.sgmodule` 会追加窄域 MITM：
 
 ```ini
-hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn
+hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.aia.com, mpaas-mgw-fin.cn-shanghai.aliyuncs.com, sop.aia.com.cn, nav-st.aia.com.cn, nav-uat.aia.com.cn
 ```
 
-它做两件事：
+它做三件事：
 
 1. **文件响应捕获**
-   - 对 AIA 三个域的图片/PDF/Office/压缩包响应，只读取 URL 和响应头。
+   - 对 AIA 官网、导航器、App H5/静态域的图片/PDF/Office/压缩包响应，只读取 URL 和响应头。
    - 如果近期已浏览产品页/API，会把文件关联到最近产品上下文。
 
 2. **产品上下文与产品页捕获**
@@ -61,6 +61,12 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn
    - 用于识别产品名、产品代码、产品状态、产品组。
    - 如果 API 内出现公开披露资料字段，会自动补全官网 PDF URL。
    - 如果页面内出现宣传彩页、产品条款、产品合同等入口链接，会把产品页 URL 提交给归档服务；服务端抓取该页及一层入口页，提取最终 PDF/图片/Office 文件并按资料类型归档。
+
+3. **App H5 / mPaaS / SOP 诊断**
+   - 监听 `01000001.h5.aia.com`、`mpaas-mgw-fin.cn-shanghai.aliyuncs.com`、`sop.aia.com.cn`，用于确认 App 内产品页和 API 入口。
+   - mPaaS 钩子 `requires-body=false,max-size=0`，只记录脱敏 URL、`Operation-Type`、`x-mgs-encryption` 加密标记、Content-Type/大小，不读取或保存加密正文。
+   - H5 钩子最多读取 1MB 文本页面用于标题/产品名识别；SOP 钩子从 URL 事件参数中提取标题、产品名和事件名。
+   - 诊断记录只保存在 Surge 本地面板/CSV，并通过系统通知提示；不发送到归档 webhook。
 
 支持的 AIA 资料字段：
 
@@ -139,7 +145,7 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
 - `FILE_ARCHIVE_MAX_BYTES`：单文件最大字节数，默认 80MB。
 - `FILE_ARCHIVE_HOST` / `FILE_ARCHIVE_PORT`：监听地址和端口。
 
-建议通过 Nginx/Caddy 提供 HTTPS；不要长期裸奔暴露无 token 的归档服务。通用抓取可把 allowlist 扩大到需要的网站，AIA 抓取建议只允许 `www.aia.com.cn,nav.aia.com.cn,cws.aia.com.cn`。
+建议通过 Nginx/Caddy 提供 HTTPS；不要长期裸奔暴露无 token 的归档服务。通用抓取可把 allowlist 扩大到需要的网站，AIA 抓取建议只允许 `www.aia.com.cn,nav.aia.com.cn,cws.aia.com.cn,01000001.h5.aia.com,nav-st.aia.com.cn,nav-uat.aia.com.cn`。mPaaS/SOP 诊断记录不需要服务端下载，因此不应加入归档服务 allowlist。
 
 ## 参数
 
@@ -153,7 +159,7 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
 - `archive_url`：可选；填归档服务地址后，新文件元数据会 POST 到服务端下载保存。
 - `archive_token`：可选；作为 Bearer token 发送。
 
-AIA 专用版当前不暴露额外参数；固定使用安全默认值：`keep=160`、`keep_context=60`、`notify=1`、`context_notify=0`、`harvest_links=1`、`archive_page=1`、`query=redact`。
+AIA 专用版当前不暴露额外参数；固定使用安全默认值：`keep=200`、`keep_context=80`、`notify=1`、`notify_diag=1`、`context_notify=0`、`harvest_links=1`、`archive_page=1`、`query=redact`。
 
 ## 非目标
 
