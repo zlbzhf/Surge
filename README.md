@@ -73,6 +73,10 @@ BiliBili 不使用大而全单 App 规则前置，保留 SukkaW 的分布式处�
   - 模块 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule`
   - 只做 bsbsb.top 空降点注入，不做 B 站去广告/皮肤/直播/账号改写。
   - 需要 MITM，仅追加 `grpc.biliapi.net, app.bilibili.com`。
+- [文件捕获 / AIA 文件捕获](docs/modules/file-capture.md)
+  - 通用模块 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/file-capture.sgmodule`
+  - AIA 专用模块 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/aia-file-capture.sgmodule`
+  - 默认不读取图片/PDF/二进制 body；AIA 专用版仅对 `www/cws/nav.aia.com.cn` 做窄域 MITM。
 
 ## 生成
 

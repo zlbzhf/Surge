@@ -1,0 +1,26 @@
+#!name=AIA 文件捕获 / AIA File Capture
+#!desc=浏览友邦 AIA 页面时捕获产品图片/PDF/资料链接；可关联产品名、资料类型并 CSV 导出。窄域 MITM，仅 www/cws/nav.aia.com.cn；不读取二进制 body，不改响应。
+#!category=Utility
+#!arguments=脚本URL:https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js?v=20260602-file-capture-v2,保留数量:160,上下文数量:60,通知:1,上下文通知:0,最小字节:0,抓取页面链接:1,查询参数:redact
+#!arguments-desc=脚本URL\n- 默认使用本仓库 raw 脚本，并带 cache-bust 版本号。\n\n保留数量\n- 文件记录保留数量，默认 160。\n\n上下文数量\n- 产品页/API 上下文保留数量，默认 60。\n\n通知\n- 1: 默认对捕获到的文件弹通知\n- 0: 关闭文件通知。\n\n上下文通知\n- 0: 默认不对页面/API 上下文弹通知\n- 1: 记录产品上下文时通知。\n\n最小字节\n- 默认 0；可设为 10240 忽略小图标。\n\n抓取页面链接\n- 1: 从 AIA HTML/API 文本中提取显式文件链接\n- 0: 仅保存上下文，不主动提取页面内链接。\n\n查询参数\n- redact: 脱敏 token/sign/key/session 等参数\n- strip: 去掉全部查询参数\n- keep: 保留查询参数，不建议公开分享导出结果。
+
+[Script]
+aia.file.capture.response = type=http-response,pattern=^https?:\/\/(?:www|cws|nav)\.aia\.com\.cn\/.+,requires-body=false,max-size=0,timeout=5,script-path={{{脚本URL}}},argument=mode=capture&keep={{{保留数量}}}&notify={{{通知}}}&min_bytes={{{最小字节}}}&kinds=image|pdf|office|archive&query={{{查询参数}}}&context_ttl=60
+aia.file.capture.context = type=http-response,pattern=^https?:\/\/(?:www|cws|nav)\.aia\.com\.cn\/(?!(?:.*\.(?:pdf|png|jpe?g|webp|gif|svg|mp4|zip|docx?|xlsx?|pptx?)(?:[?#]|$))).+,requires-body=1,max-size=1048576,timeout=5,script-path={{{脚本URL}}},argument=mode=context&keep={{{保留数量}}}&keep_context={{{上下文数量}}}&harvest_links={{{抓取页面链接}}}&notify_context={{{上下文通知}}}
+aia.file.capture.panel = type=generic,timeout=5,script-path={{{脚本URL}}},argument=mode=panel
+aia.file.capture.export = type=generic,timeout=5,script-path={{{脚本URL}}},argument=mode=export&limit=60
+aia.file.capture.clear = type=generic,timeout=5,script-path={{{脚本URL}}},argument=mode=clear&context=true
+
+[Panel]
+AIA 文件捕获 = script-name=aia.file.capture.panel,update-interval=60
+AIA 文件捕获导出 = script-name=aia.file.capture.export,update-interval=3600
+
+[MITM]
+hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn
+
+# 使用方式：
+# 1. 安装模块后确保 Surge 已信任 MITM 证书。
+# 2. 打开 AIA 官网/导航器产品页；页面/API 上下文会记录产品名。
+# 3. PDF/图片响应会自动关联最近产品上下文；公开披露 API 字段会补全条款、费率表、现金价值表、产品说明书 PDF URL。
+# 4. 面板显示最近捕获；“AIA 文件捕获导出”面板给 CSV 文本，可复制出来继续整理。
+# 5. 仅窄域 MITM，不要改成 hostname=*。

@@ -32,8 +32,13 @@ BSBSB_MODULE = ROOT / "modules" / "bilibili-bsbsb.sgmodule"
 BSBSB_SCRIPT = ROOT / "modules" / "scripts" / "bilibili-bsbsb.airborne.js"
 BSBSB_DOC = ROOT / "docs" / "modules" / "bilibili-bsbsb.md"
 BSBSB_PATCH = ROOT / "docs" / "modules" / "bilibili-bsbsb-sparkle.patch"
+FILE_CAPTURE_MODULE = ROOT / "modules" / "file-capture.sgmodule"
+AIA_FILE_CAPTURE_MODULE = ROOT / "modules" / "aia-file-capture.sgmodule"
+FILE_CAPTURE_SCRIPT = ROOT / "modules" / "scripts" / "file-capture.js"
+FILE_CAPTURE_DOC = ROOT / "docs" / "modules" / "file-capture.md"
 GPL_LICENSE = ROOT / "modules" / "LICENSES" / "GPL-3.0.txt"
 BSBSB_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js"
+FILE_CAPTURE_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js"
 BSBSB_CHRONOS_SCRIPT_URL = "https://raw.githubusercontent.com/kokoryh/Sparkle/refs/heads/master/dist/bilibili.protobuf.response.js"
 FORBIDDEN_ACTIVE_GROUPS = {
     "BiliBili": "BiliBili should stay handled by SukkaW domestic/stream rules, not as an independent active policy group",
@@ -508,6 +513,106 @@ def check_bsbsb_module() -> list[Issue]:
     return issues
 
 
+def check_file_capture_modules() -> list[Issue]:
+    """Validate file-capture optional modules keep metadata-only and narrow-MITM boundaries."""
+    issues: list[Issue] = []
+    required_files = [FILE_CAPTURE_MODULE, AIA_FILE_CAPTURE_MODULE, FILE_CAPTURE_SCRIPT, FILE_CAPTURE_DOC]
+    for path in required_files:
+        if not path.exists():
+            issues.append(Issue(path, 1, "missing file-capture optional module artifact"))
+    if issues:
+        return issues
+
+    generic_text = FILE_CAPTURE_MODULE.read_text(encoding="utf-8")
+    aia_text = AIA_FILE_CAPTURE_MODULE.read_text(encoding="utf-8")
+    script_text = FILE_CAPTURE_SCRIPT.read_text(encoding="utf-8")
+    doc_text = FILE_CAPTURE_DOC.read_text(encoding="utf-8")
+
+    generic_checks = [
+        ("#!name=文件捕获 / File Capture", "generic file-capture module should have a stable human-readable name"),
+        (FILE_CAPTURE_SCRIPT_URL, "generic module should reference the same-repo file-capture script URL"),
+        ("file-capture.js?v=20260602-file-capture-v2", "generic module should cache-bust the file-capture script URL"),
+        ("requires-body=false,max-size=0", "generic capture must stay metadata-only and not read binary response bodies"),
+        ("file.capture.export", "generic module should expose a CSV export panel"),
+        ("查询参数:redact", "generic module should default to query redaction"),
+    ]
+    for needle, message in generic_checks:
+        if needle not in generic_text:
+            issues.append(Issue(FILE_CAPTURE_MODULE, 1, message))
+    _mitm_start, mitm_lines = section(generic_text, "MITM")
+    if any(active(line) for line in mitm_lines):
+        issues.append(Issue(FILE_CAPTURE_MODULE, _mitm_start or 1, "generic file-capture module must not append MITM hostnames by default"))
+
+    aia_checks = [
+        ("#!name=AIA 文件捕获 / AIA File Capture", "AIA module should have a stable human-readable name"),
+        (FILE_CAPTURE_SCRIPT_URL, "AIA module should reference the same-repo file-capture script URL"),
+        ("file-capture.js?v=20260602-file-capture-v2", "AIA module should cache-bust the file-capture script URL"),
+        ("aia.file.capture.response", "AIA module should capture AIA file responses"),
+        ("aia.file.capture.context", "AIA module should capture AIA product/page context"),
+        ("requires-body=false,max-size=0", "AIA file-response capture must not read binary response bodies"),
+        ("requires-body=1,max-size=1048576", "AIA context hook should cap text/API body reads at 1MB"),
+        ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "AIA MITM scope should stay limited to the three AIA hosts"),
+        ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
+    ]
+    for needle, message in aia_checks:
+        if needle not in aia_text:
+            issues.append(Issue(AIA_FILE_CAPTURE_MODULE, 1, message))
+
+    forbidden_module_needles = [
+        ("hostname = *", "file-capture modules must not MITM all hostnames"),
+        ("skip-server-cert-verify", "file-capture modules must not disable certificate verification"),
+        ("Cookie", "file-capture modules must not capture or document cookie harvesting"),
+    ]
+    for path, text in [(FILE_CAPTURE_MODULE, generic_text), (AIA_FILE_CAPTURE_MODULE, aia_text)]:
+        for needle, message in forbidden_module_needles:
+            if needle in text:
+                issues.append(Issue(path, 1, message))
+
+    script_checks = [
+        ("Surge File Capture v2", "script should identify the v2 file-capture implementation"),
+        ("SECRET_QUERY_KEYS", "script should redact sensitive query parameters"),
+        ("sanitizeUrl", "script should sanitize stored/exported URLs"),
+        ("requires-body", "script comments should document metadata-only operation"),
+        ("args.mode === 'context'", "script should support AIA product context capture"),
+        ("AIA_MATERIAL_FIELDS", "script should recognize AIA disclosure material fields"),
+        ("productItem", "script should map AIA productItem material field"),
+        ("ratesTable", "script should map AIA ratesTable material field"),
+        ("cashValueTable", "script should map AIA cashValueTable material field"),
+        ("productInstruction", "script should map AIA productInstruction material field"),
+        ("csvEscape", "script should support safe CSV export"),
+        ("$done({});", "script should fail open for response hooks"),
+    ]
+    for needle, message in script_checks:
+        if needle not in script_text:
+            issues.append(Issue(FILE_CAPTURE_SCRIPT, 1, message))
+    forbidden_script_needles = [
+        ("$persistentStore.write(JSON.stringify($request", "script must not persist raw requests"),
+        ("$request.headers", "script must not persist request headers"),
+        ("$response.body", "script should not read response body in capture mode; use res.body only in context mode"),
+        ("hostname = *", "script must not suggest broad MITM"),
+    ]
+    for needle, message in forbidden_script_needles:
+        if needle in script_text:
+            issues.append(Issue(FILE_CAPTURE_SCRIPT, 1, message))
+    if "typeof res.body === 'string' ? res.body : ''" not in script_text:
+        issues.append(Issue(FILE_CAPTURE_SCRIPT, 1, "context hook should read text body defensively and only when Surge supplied it"))
+
+    doc_checks = [
+        ("不进入主 `Surge.conf` 默认启用", "docs should state file-capture modules are optional"),
+        ("requires-body=false,max-size=0", "docs should disclose metadata-only binary handling"),
+        ("www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "docs should disclose AIA MITM scope"),
+        ("QUERY=redact", "docs should document query redaction"),
+        ("CSV", "docs should document CSV export"),
+        ("不保存 Cookie", "docs should state cookies/request headers are not saved"),
+        ("不做文件下载器", "docs should state non-goals"),
+    ]
+    for needle, message in doc_checks:
+        if needle not in doc_text:
+            issues.append(Issue(FILE_CAPTURE_DOC, 1, message))
+
+    return issues
+
+
 def validate(skip_network: bool = False) -> int:
     issues: list[Issue] = []
     for path in CONFIG_FILES:
@@ -519,6 +624,7 @@ def validate(skip_network: bool = False) -> int:
         issues.extend(check_security(path, text))
         issues.extend(check_urls(path, rules, skip_network=skip_network))
     issues.extend(check_bsbsb_module())
+    issues.extend(check_file_capture_modules())
 
     if issues:
         for issue in issues:

@@ -124,6 +124,25 @@
 - BilibiliSponsorBlock 空降助手只做 bsbsb.top 片段注入，不混入去广告、直播、皮肤或账号相关改写。
 - BilibiliSponsorBlock 模块 MITM 范围必须保持最小化：`grpc.biliapi.net, app.bilibili.com`。
 
+### 文件捕获与资料索引
+
+当前仓库托管：
+
+- `modules/file-capture.sgmodule` — 通用文件捕获面板；默认不追加 MITM，不读取二进制 body。
+- `modules/aia-file-capture.sgmodule` — AIA 友邦文件捕获；仅对 `www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn` 做窄域 MITM，用于关联产品名、图片和 PDF 资料。
+
+可用于：
+
+- 浏览网页或 App 时临时记录图片、PDF、Office、压缩包、媒体文件 URL。
+- 通过 Surge 面板导出 CSV，继续整理产品资料索引。
+- 对 AIA 产品页/API 做窄域上下文关联，补全公开披露资料 URL。
+
+建议：
+
+- 通用模块默认不附带 MITM hostname；只在需要的网站上单独开启。
+- AIA 专用模块只保留 `www/cws/nav.aia.com.cn` 三个 hostname，不扩大到 `hostname=*`。
+- 捕获脚本不保存 Cookie、请求头、账号信息或响应正文。
+
 ### 中文广告增强
 
 参考：

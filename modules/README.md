@@ -5,6 +5,8 @@
 ## 当前模块
 
 - `bilibili-bsbsb.sgmodule` — BilibiliSponsorBlock 空降助手；仅为 B 站 App 注入 bsbsb.top 空降点，不包含 B 站去广告或账号相关改写。
+- `file-capture.sgmodule` — 通用文件捕获面板；默认不追加 MITM，只用响应 URL/headers 识别图片、PDF、Office、压缩包和媒体文件。
+- `aia-file-capture.sgmodule` — AIA 友邦文件捕获；窄域 MITM `www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn`，把产品上下文和 PDF/图片资料关联起来。
 
 ## 使用方式
 
@@ -12,11 +14,14 @@
 
 ```text
 https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmodule
+https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/file-capture.sgmodule
+https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/aia-file-capture.sgmodule
 ```
 
 详细说明见：
 
 - `docs/modules/bilibili-bsbsb.md`
+- `docs/modules/file-capture.md`
 
 ## 安全边界
 
@@ -28,3 +33,5 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/bilibili-bsbsb.sgmod
 ## License / attribution
 
 `bilibili-bsbsb` 脚本派生自 `kokoryh/Sparkle`，数据/API 来自 `hanydd/BilibiliSponsorBlock` / `bsbsb.top`，按 `GPL-3.0-or-later` 标注。
+
+`file-capture` / `aia-file-capture` 为本仓库原创脚本，按仓库默认许可发布。
