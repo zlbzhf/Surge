@@ -97,11 +97,17 @@ python3 tools/file-archive-server.py \
   --token '换成强随机token'
 ```
 
-然后在 Surge 的模块参数编辑器里填写这两个字段。模块参数使用 Surge 官方 query-string 声明，并用 `%key%` 占位，脚本 URL 是硬编码的外部脚本地址：
+通用版可在 Surge 模块参数编辑器里填写这两个字段。脚本 URL 是硬编码的外部脚本地址：
 
 ```text
 archive_url = https://你的域名/archive
 archive_token = 换成强随机token
+```
+
+AIA 专用版为兼容部分 Surge 客户端的参数编辑器，只保留一个可编辑字段，归档地址已固定为 `https://aia.zuiai.ggff.net/archive`：
+
+```text
+token = 换成强随机token
 ```
 
 保存后的目录示例：
@@ -143,9 +149,8 @@ archive_token = 换成强随机token
 
 AIA 专用版额外参数：
 
-- `keep_context`：默认 60。
-- `context_notify`：默认 0。
-- `harvest_links`：默认 1，从 AIA HTML/API 文本中提取显式文件链接。
+- `token`：归档服务 Bearer token。
+- 其他参数固定为安全默认值：`keep=160`、`keep_context=60`、`notify=1`、`context_notify=0`、`harvest_links=1`、`query=redact`。
 
 ## 非目标
 

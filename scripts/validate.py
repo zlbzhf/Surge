@@ -558,9 +558,10 @@ def check_file_capture_modules() -> list[Issue]:
         ("requires-body=1,max-size=1048576", "AIA context hook should cap text/API body reads at 1MB"),
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "AIA MITM scope should stay limited to the three AIA hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
-        ("#!arguments=keep=160&keep_context=60&notify=1", "AIA module should use Surge official query-string argument syntax"),
-        ("archive_url=&archive_token=", "AIA module should expose optional archive webhook configuration"),
-        ("archive_url=%archive_url%", "AIA hooks should forward archive webhook argument"),
+        ("#!arguments=token=", "AIA module should expose only one editable token field for maximum Surge compatibility"),
+        ("archive_url=https%3A%2F%2Faia.zuiai.ggff.net%2Farchive", "AIA module should hard-code the archive endpoint to avoid multi-argument editor failures"),
+        ("archive_token=%token%", "AIA hooks should forward the single editable token field"),
+        ("?cb=aia-token-v1", "AIA script path should cache-bust the external script URL"),
     ]
     for needle, message in aia_checks:
         if needle not in aia_text:
