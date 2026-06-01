@@ -154,6 +154,19 @@ function inferMaterialFromLabel(label, fallback) {
   return fallback || '';
 }
 
+function inferMaterialFromSopEvent(eventName, title, detail) {
+  const text = safeDecode([eventName || '', title || '', detail || ''].join(' ')).replace(/\s+/g, ' ');
+  const byLabel = inferMaterialFromLabel(text, '');
+  if (byLabel) return byLabel;
+  if (/Terms?Click|Clause|PolicyTerm|TermDetail/i.test(text)) return '产品条款';
+  if (/Brochure|Leaflet|ColorPage|Poster|Flyer/i.test(text)) return '宣传彩页';
+  if (/Instruction|ProductIntro|Description/i.test(text)) return '产品说明书/产品说明';
+  if (/Rate|Premium/i.test(text)) return '费率表';
+  if (/CashValue|CSV/i.test(text)) return '现金价值全表';
+  if (/Contract/i.test(text)) return '产品合同';
+  return '';
+}
+
 function inferProductFromFilename(filename) {
   let name = safeDecode(String(filename || '')).replace(/\.[a-z0-9]{1,12}$/i, '');
   if (!name || /^[a-f0-9]{16,}$/i.test(name) || /^[0-9a-f-]{24,}$/i.test(name)) return '';
@@ -457,9 +470,53 @@ function attachContext(item, ttlMinutes) {
   if (!best || bestScore < 2.5) return item;
   if (!item.productName && best.productName) item.productName = best.productName;
   if (!item.productCode && best.productCode) item.productCode = best.productCode;
+  if (!item.materialType && best.materialType) item.materialType = best.materialType;
   if (!item.pageTitle && best.title) item.pageTitle = best.title;
   if (!item.sourceUrl && best.sourceUrl) item.sourceUrl = best.sourceUrl;
   return item;
+}
+
+function retagRecentFilesFromContext(ctx, options) {
+  const opts = options || {};
+  if (!ctx || !ctx.materialType) return [];
+  const keep = Math.max(1, Math.min(800, asInt(opts.keep) || DEFAULT_KEEP));
+  const ttlMs = Math.max(1, asInt(opts.seconds) || 20) * 1000;
+  const ctxRoot = ctx.root || rootDomain(ctx.host || '');
+  const now = Date.now();
+  const changed = [];
+  const items = readItems().map((item) => {
+    if (!item || item.kind === 'diagnostic' || item.kind === 'page') return item;
+    if (!['pdf', 'office', 'archive', 'binary'].includes(item.kind)) return item;
+    const ts = Date.parse(item.ts || '') || 0;
+    if (ts && Math.abs(now - ts) > ttlMs) return item;
+    const itemRoot = rootDomain(item.host || '');
+    if (ctxRoot && itemRoot && ctxRoot !== itemRoot) return item;
+
+    let next = item;
+    function clone() {
+      if (next === item) next = Object.assign({}, item);
+    }
+    if (!next.productName && ctx.productName) {
+      clone();
+      next.productName = ctx.productName;
+    }
+    if (!next.materialType && ctx.materialType) {
+      clone();
+      next.materialType = ctx.materialType;
+    }
+    if (!next.pageTitle && ctx.title) {
+      clone();
+      next.pageTitle = ctx.title;
+    }
+    if (!next.sourceUrl && ctx.sourceUrl) {
+      clone();
+      next.sourceUrl = ctx.sourceUrl;
+    }
+    if (next !== item) changed.push(Object.assign({}, next, { downloadUrl: next.downloadUrl || next.url }));
+    return next;
+  });
+  if (changed.length) writeItems(items.slice(0, keep));
+  return changed;
 }
 
 function buildFileItem(rawUrl, options) {
@@ -774,6 +831,7 @@ function diagnosticCapture() {
   const operationType = requestHeaders['operation-type'] || requestHeaders['x-operation-type'] || responseHeaders['operation-type'] || '';
   const encrypted = requestHeaders['x-mgs-encryption'] || responseHeaders['x-mgs-encryption'] || '';
   let item = null;
+  let retaggedItems = [];
 
   if (/mpaas-mgw-fin\.cn-shanghai\.aliyuncs\.com$/i.test(host)) {
     item = buildDiagnosticItem({
@@ -791,6 +849,7 @@ function diagnosticCapture() {
     });
   } else if (/sop\.aia\.com\.cn$/i.test(host)) {
     const telemetry = parseSopTelemetry(req.url || '') || {};
+    const materialHint = inferMaterialFromSopEvent(telemetry.eventName || '', telemetry.title || '', telemetry.description || '');
     item = buildDiagnosticItem({
       url: req.url || '',
       host,
@@ -803,8 +862,24 @@ function diagnosticCapture() {
       productName: telemetry.productName || '',
       pageTitle: telemetry.title || '',
       eventName: telemetry.eventName || '',
-      detail: [telemetry.description, telemetry.platformType, telemetry.pageUrl].filter(Boolean).join(' · '),
+      detail: [materialHint ? `material=${materialHint}` : '', telemetry.description, telemetry.platformType, telemetry.pageUrl].filter(Boolean).join(' · '),
     });
+    if (telemetry.productName || telemetry.title) {
+      const ctx = {
+        ts: nowIso(),
+        productName: telemetry.productName || '',
+        productCode: '',
+        title: telemetry.title || '',
+        materialType: materialHint,
+        eventName: telemetry.eventName || '',
+        host,
+        root: rootDomain(host),
+        sourceUrl: sanitizeDiagnosticUrl(req.url || ''),
+        source: 'aia-diagnostic-sop',
+      };
+      rememberContexts([ctx], Math.max(1, Math.min(200, asInt(args.keep_context) || DEFAULT_KEEP_CONTEXT)));
+      retaggedItems = retagRecentFilesFromContext(ctx, { keep, seconds: asInt(args.retag_seconds) || 20 });
+    }
   } else if (/01000001\.h5\.aia\.com$/i.test(host)) {
     const title = htmlTitle(body);
     const productName = inferProductNameFromText(body, title);
@@ -846,6 +921,10 @@ function diagnosticCapture() {
     const sub = item.operationType || item.productName || item.pageTitle || item.host || item.materialType;
     const detail = [item.eventName, item.encrypted ? `encrypted=${item.encrypted}` : '', item.detail || '', item.url].filter(Boolean).join('\n').slice(0, 1800);
     $notification.post('AIA 诊断捕获', sub || item.filename, detail, { url: req.url || item.url });
+  }
+  if (retaggedItems.length && archiveEndpoint(args)) {
+    finishAfterArchive(retaggedItems, args, 'context-retag', {});
+    return;
   }
   $done({});
 }

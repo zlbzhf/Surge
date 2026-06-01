@@ -562,7 +562,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.aia.com, mpaas-mgw-fin.cn-shanghai.aliyuncs.com, sop.aia.com.cn, nav-st.aia.com.cn, nav-uat.aia.com.cn", "AIA MITM scope should stay limited to the approved AIA/H5/mPaaS diagnostic hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
         ("archive_url=https%3A%2F%2Faia.zuiai.ggff.net%2Farchive", "AIA module should hard-code the archive endpoint to avoid multi-argument editor failures"),
-        ("?cb=aia-h5-mpaas-diagnostic-v1", "AIA script path should cache-bust the H5/mPaaS diagnostic module URL"),
+        ("retag_seconds=20", "AIA SOP diagnostic hook should retag late-arriving PDF/Office responses"),
+        ("?cb=aia-h5-mpaas-diagnostic-v2", "AIA script path should cache-bust the H5/mPaaS diagnostic module URL"),
         ("archive_page=1", "AIA context hook should submit product pages for server-side file extraction"),
     ]
     for needle, message in aia_checks:
@@ -611,6 +612,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("x-mgs-encryption", "script should record mPaaS encryption marker without body storage"),
         ("parseSopTelemetry", "script should extract AIA SOP telemetry title/product metadata"),
         ("notify_diag", "script should notify diagnostic captures because panel content is hard to copy"),
+        ("inferMaterialFromSopEvent", "script should infer material types from AIA SOP click events"),
+        ("retagRecentFilesFromContext", "script should retroactively tag recent PDF/Office captures when SOP click events arrive late"),
         ("宣传彩页", "script should classify product brochure links by anchor text"),
         ("$done({});", "script should fail open for response hooks"),
     ]

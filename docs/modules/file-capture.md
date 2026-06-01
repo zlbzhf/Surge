@@ -66,7 +66,8 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.
    - 监听 `01000001.h5.aia.com`、`mpaas-mgw-fin.cn-shanghai.aliyuncs.com`、`sop.aia.com.cn`，用于确认 App 内产品页和 API 入口。
    - mPaaS 钩子 `requires-body=false,max-size=0`，只记录脱敏 URL、`Operation-Type`、`x-mgs-encryption` 加密标记、Content-Type/大小，不读取或保存加密正文。
    - H5 钩子最多读取 1MB 文本页面用于标题/产品名识别；SOP 钩子从 URL 事件参数中提取标题、产品名和事件名。
-   - 诊断记录只保存在 Surge 本地面板/CSV，并通过系统通知提示；不发送到归档 webhook。
+   - SOP 点击事件会作为近实时上下文：如果“产品条款/说明书/彩页”等点击事件比 PDF 响应晚几十毫秒出现，脚本会把刚捕获的 PDF/Office 反向补齐产品名和资料类型。
+   - 诊断记录只保存在 Surge 本地面板/CSV，并通过系统通知提示；不会把 mPaaS/H5/SOP 诊断记录发送到归档 webhook。只有被 SOP 事件补齐后的非诊断文件元数据会重发给归档服务。
 
 支持的 AIA 资料字段：
 
