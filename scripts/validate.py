@@ -533,12 +533,14 @@ def check_file_capture_modules() -> list[Issue]:
     generic_checks = [
         ("#!name=文件捕获 / File Capture", "generic file-capture module should have a stable human-readable name"),
         (FILE_CAPTURE_SCRIPT_URL, "generic module should reference the same-repo file-capture script URL"),
-        ("file-capture.js?v=20260602-file-capture-v3", "generic module should cache-bust the file-capture script URL"),
+        ("file-capture.js?v=20260602-file-capture-v4", "generic module should cache-bust the file-capture script URL"),
         ("requires-body=false,max-size=0", "generic capture must stay metadata-only and not read binary response bodies"),
         ("file.capture.export", "generic module should expose a CSV export panel"),
-        ("查询参数:redact", "generic module should default to query redaction"),
-        ("归档Webhook:", "generic module should expose optional archive webhook configuration"),
-        ("archive_url={{{归档Webhook}}}", "generic capture hook should forward archive webhook argument"),
+        ("#!arguments=SCRIPT_URL=", "generic module should use official Surge query-string parameter syntax"),
+        ("QUERY=redact", "generic module should default to query redaction"),
+        ("ARCHIVE_URL=", "generic module should expose optional archive webhook configuration"),
+        ("script-path=%SCRIPT_URL%", "generic module should use official %SCRIPT_URL% placeholder syntax"),
+        ("archive_url=%ARCHIVE_URL%", "generic capture hook should forward archive webhook argument"),
     ]
     for needle, message in generic_checks:
         if needle not in generic_text:
@@ -550,15 +552,17 @@ def check_file_capture_modules() -> list[Issue]:
     aia_checks = [
         ("#!name=AIA 文件捕获 / AIA File Capture", "AIA module should have a stable human-readable name"),
         (FILE_CAPTURE_SCRIPT_URL, "AIA module should reference the same-repo file-capture script URL"),
-        ("file-capture.js?v=20260602-file-capture-v3", "AIA module should cache-bust the file-capture script URL"),
+        ("file-capture.js?v=20260602-file-capture-v4", "AIA module should cache-bust the file-capture script URL"),
         ("aia.file.capture.response", "AIA module should capture AIA file responses"),
         ("aia.file.capture.context", "AIA module should capture AIA product/page context"),
         ("requires-body=false,max-size=0", "AIA file-response capture must not read binary response bodies"),
         ("requires-body=1,max-size=1048576", "AIA context hook should cap text/API body reads at 1MB"),
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "AIA MITM scope should stay limited to the three AIA hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
-        ("归档Webhook:", "AIA module should expose optional archive webhook configuration"),
-        ("archive_url={{{归档Webhook}}}", "AIA hooks should forward archive webhook argument"),
+        ("#!arguments=SCRIPT_URL=", "AIA module should use official Surge query-string parameter syntax"),
+        ("ARCHIVE_URL=", "AIA module should expose optional archive webhook configuration"),
+        ("script-path=%SCRIPT_URL%", "AIA module should use official %SCRIPT_URL% placeholder syntax"),
+        ("archive_url=%ARCHIVE_URL%", "AIA hooks should forward archive webhook argument"),
     ]
     for needle, message in aia_checks:
         if needle not in aia_text:
@@ -573,6 +577,9 @@ def check_file_capture_modules() -> list[Issue]:
         for needle, message in forbidden_module_needles:
             if needle in text:
                 issues.append(Issue(path, 1, message))
+        for needle in ("#!arguments=脚本URL:", "{{{脚本URL}}}", "{{{归档Webhook}}}"):
+            if needle in text:
+                issues.append(Issue(path, 1, "file-capture modules must not use legacy/non-official argument placeholder syntax"))
 
     script_checks = [
         ("Surge File Capture v3", "script should identify the v3 file-capture implementation"),

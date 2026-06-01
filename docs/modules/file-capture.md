@@ -19,7 +19,7 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/aia-file-capture.sgm
 脚本：
 
 ```text
-https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js?v=20260602-file-capture-v3
+https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js?v=20260602-file-capture-v4
 ```
 
 ## 适用场景
@@ -97,11 +97,11 @@ python3 tools/file-archive-server.py \
   --token '换成强随机token'
 ```
 
-然后在模块参数里填写：
+然后在模块参数里填写（Surge 官方参数表使用英文参数名）：
 
 ```text
-归档Webhook: https://你的域名/archive
-归档Token: 换成强随机token
+ARCHIVE_URL: https://你的域名/archive
+ARCHIVE_TOKEN: 换成强随机token
 ```
 
 保存后的目录示例：
@@ -131,21 +131,21 @@ python3 tools/file-archive-server.py \
 
 ## 参数
 
-通用版主要参数：
+通用版主要参数（Surge 参数表使用英文键名）：
 
-- `保留数量`：默认 120，最多 800。
-- `通知`：默认 0；设为 1 后捕获文件时发系统通知。
-- `最小字节`：默认 0；可设为 10240 忽略小图标。
-- `类型`：默认 `image|pdf|archive|video|audio|office|binary`。
-- `查询参数`：默认 `redact`，也可用 `strip` 或 `keep`。
-- `归档Webhook`：可选；填归档服务地址后，新文件元数据会 POST 到服务端下载保存。
-- `归档Token`：可选；作为 `Authorization: Bearer TOKEN` 发送。
+- `KEEP`：默认 120，最多 800。
+- `NOTIFY`：默认 0；设为 1 后捕获文件时发系统通知。
+- `MIN_BYTES`：默认 0；可设为 10240 忽略小图标。
+- `KINDS`：默认 `image|pdf|archive|video|audio|office|binary`。
+- `QUERY`：默认 `redact`，也可用 `strip` 或 `keep`。
+- `ARCHIVE_URL`：可选；填归档服务地址后，新文件元数据会 POST 到服务端下载保存。
+- `ARCHIVE_TOKEN`：可选；作为 Bearer token 发送。
 
 AIA 专用版额外参数：
 
-- `上下文数量`：默认 60。
-- `上下文通知`：默认 0。
-- `抓取页面链接`：默认 1，从 AIA HTML/API 文本中提取显式文件链接。
+- `KEEP_CONTEXT`：默认 60。
+- `CONTEXT_NOTIFY`：默认 0。
+- `HARVEST_LINKS`：默认 1，从 AIA HTML/API 文本中提取显式文件链接。
 
 ## 非目标
 
