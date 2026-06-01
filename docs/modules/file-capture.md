@@ -19,7 +19,7 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/aia-file-capture.sgm
 脚本：
 
 ```text
-https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js?v=20260602-file-capture-v2
+https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js?v=20260602-file-capture-v3
 ```
 
 ## 适用场景
@@ -27,6 +27,7 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture
 - 浏览网页或 App 时记录图片、PDF、Office、压缩包、音视频文件 URL。
 - 把最近捕获结果放到 Surge 面板里查看。
 - 通过导出面板复制 CSV 文本，继续做产品资料索引。
+- 可选：把新捕获文件发送到自建归档 webhook，由 VPS/电脑下载文件并按产品整理成目录。
 - 浏览 AIA 友邦页面时，把随机 PDF/图片 URL 尽量关联到产品名和资料类型。
 
 ## 安全边界
@@ -36,6 +37,8 @@ https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture
 - 脚本不修改 HTTP 响应；异常时失败开放，原响应继续返回。
 - 记录里默认 `QUERY=redact`，会脱敏 `token`、`sign`、`key`、`session` 等查询参数。
 - 记录有数量上限并按 URL/类型/大小去重。
+- 可选归档 webhook 只发送新捕获项的元数据；Surge 端仍不读取二进制 body。
+- 归档服务下载文件时默认要求 token、建议 host allowlist，并阻止内网/回环地址，避免 SSRF。
 - 不要把 MITM 改成 `hostname=*`。
 
 ## AIA 专用版
@@ -81,6 +84,51 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn
   - `url`
   - `source`
 
+## 归档 webhook：真正保存文件
+
+如果只启用模块，Surge 本地保存的是索引，不保存 PDF/图片本体。要把文件整理成目录，运行仓库里的归档服务：
+
+```bash
+python3 tools/file-archive-server.py \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --root /data/surge-file-archive \
+  --allowed-hosts www.aia.com.cn,nav.aia.com.cn \
+  --token '换成强随机token'
+```
+
+然后在模块参数里填写：
+
+```text
+归档Webhook: https://你的域名/archive
+归档Token: 换成强随机token
+```
+
+保存后的目录示例：
+
+```text
+/data/surge-file-archive/
+  index.csv
+  index.jsonl
+  友邦某某保险/
+    产品条款/
+      xxx.pdf
+    费率表/
+      xxx.pdf
+    现金价值全表/
+      xxx.pdf
+```
+
+服务端环境变量也可配置：
+
+- `FILE_ARCHIVE_ROOT`：归档根目录。
+- `FILE_ARCHIVE_TOKEN`：Bearer token。
+- `FILE_ARCHIVE_ALLOWED_HOST_SUFFIXES`：允许下载的域名后缀，逗号分隔。
+- `FILE_ARCHIVE_MAX_BYTES`：单文件最大字节数，默认 80MB。
+- `FILE_ARCHIVE_HOST` / `FILE_ARCHIVE_PORT`：监听地址和端口。
+
+建议通过 Nginx/Caddy 提供 HTTPS；不要裸奔暴露无 token 的归档服务。通用抓取可把 allowlist 扩大到需要的网站，AIA 抓取建议只允许 `www.aia.com.cn,nav.aia.com.cn,cws.aia.com.cn`。
+
 ## 参数
 
 通用版主要参数：
@@ -90,6 +138,8 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn
 - `最小字节`：默认 0；可设为 10240 忽略小图标。
 - `类型`：默认 `image|pdf|archive|video|audio|office|binary`。
 - `查询参数`：默认 `redact`，也可用 `strip` 或 `keep`。
+- `归档Webhook`：可选；填归档服务地址后，新文件元数据会 POST 到服务端下载保存。
+- `归档Token`：可选；作为 `Authorization: Bearer TOKEN` 发送。
 
 AIA 专用版额外参数：
 
@@ -99,7 +149,7 @@ AIA 专用版额外参数：
 
 ## 非目标
 
-- 不做文件下载器。
+- Surge 模块本体不直接下载二进制文件；只有你配置归档 webhook 后，服务端才会下载。
 - 不保存 Cookie、请求头、账号信息或响应正文。
 - 不解析 PDF/图片内容。
 - 不绕过登录、权限或付费限制。

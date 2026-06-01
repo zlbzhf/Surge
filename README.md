@@ -77,6 +77,7 @@ BiliBili 不使用大而全单 App 规则前置，保留 SukkaW 的分布式处�
   - 通用模块 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/file-capture.sgmodule`
   - AIA 专用模块 URL：`https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/aia-file-capture.sgmodule`
   - 默认不读取图片/PDF/二进制 body；AIA 专用版仅对 `www/cws/nav.aia.com.cn` 做窄域 MITM。
+  - 可选接入 `tools/file-archive-server.py` 归档 webhook，在 VPS/电脑上按产品/资料类型保存文件。
 
 ## 生成
 

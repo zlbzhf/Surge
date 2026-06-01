@@ -36,6 +36,7 @@ FILE_CAPTURE_MODULE = ROOT / "modules" / "file-capture.sgmodule"
 AIA_FILE_CAPTURE_MODULE = ROOT / "modules" / "aia-file-capture.sgmodule"
 FILE_CAPTURE_SCRIPT = ROOT / "modules" / "scripts" / "file-capture.js"
 FILE_CAPTURE_DOC = ROOT / "docs" / "modules" / "file-capture.md"
+FILE_ARCHIVE_SERVER = ROOT / "tools" / "file-archive-server.py"
 GPL_LICENSE = ROOT / "modules" / "LICENSES" / "GPL-3.0.txt"
 BSBSB_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js"
 FILE_CAPTURE_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js"
@@ -516,7 +517,7 @@ def check_bsbsb_module() -> list[Issue]:
 def check_file_capture_modules() -> list[Issue]:
     """Validate file-capture optional modules keep metadata-only and narrow-MITM boundaries."""
     issues: list[Issue] = []
-    required_files = [FILE_CAPTURE_MODULE, AIA_FILE_CAPTURE_MODULE, FILE_CAPTURE_SCRIPT, FILE_CAPTURE_DOC]
+    required_files = [FILE_CAPTURE_MODULE, AIA_FILE_CAPTURE_MODULE, FILE_CAPTURE_SCRIPT, FILE_CAPTURE_DOC, FILE_ARCHIVE_SERVER]
     for path in required_files:
         if not path.exists():
             issues.append(Issue(path, 1, "missing file-capture optional module artifact"))
@@ -526,15 +527,18 @@ def check_file_capture_modules() -> list[Issue]:
     generic_text = FILE_CAPTURE_MODULE.read_text(encoding="utf-8")
     aia_text = AIA_FILE_CAPTURE_MODULE.read_text(encoding="utf-8")
     script_text = FILE_CAPTURE_SCRIPT.read_text(encoding="utf-8")
+    archive_server_text = FILE_ARCHIVE_SERVER.read_text(encoding="utf-8")
     doc_text = FILE_CAPTURE_DOC.read_text(encoding="utf-8")
 
     generic_checks = [
         ("#!name=文件捕获 / File Capture", "generic file-capture module should have a stable human-readable name"),
         (FILE_CAPTURE_SCRIPT_URL, "generic module should reference the same-repo file-capture script URL"),
-        ("file-capture.js?v=20260602-file-capture-v2", "generic module should cache-bust the file-capture script URL"),
+        ("file-capture.js?v=20260602-file-capture-v3", "generic module should cache-bust the file-capture script URL"),
         ("requires-body=false,max-size=0", "generic capture must stay metadata-only and not read binary response bodies"),
         ("file.capture.export", "generic module should expose a CSV export panel"),
         ("查询参数:redact", "generic module should default to query redaction"),
+        ("归档Webhook:", "generic module should expose optional archive webhook configuration"),
+        ("archive_url={{{归档Webhook}}}", "generic capture hook should forward archive webhook argument"),
     ]
     for needle, message in generic_checks:
         if needle not in generic_text:
@@ -546,13 +550,15 @@ def check_file_capture_modules() -> list[Issue]:
     aia_checks = [
         ("#!name=AIA 文件捕获 / AIA File Capture", "AIA module should have a stable human-readable name"),
         (FILE_CAPTURE_SCRIPT_URL, "AIA module should reference the same-repo file-capture script URL"),
-        ("file-capture.js?v=20260602-file-capture-v2", "AIA module should cache-bust the file-capture script URL"),
+        ("file-capture.js?v=20260602-file-capture-v3", "AIA module should cache-bust the file-capture script URL"),
         ("aia.file.capture.response", "AIA module should capture AIA file responses"),
         ("aia.file.capture.context", "AIA module should capture AIA product/page context"),
         ("requires-body=false,max-size=0", "AIA file-response capture must not read binary response bodies"),
         ("requires-body=1,max-size=1048576", "AIA context hook should cap text/API body reads at 1MB"),
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "AIA MITM scope should stay limited to the three AIA hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
+        ("归档Webhook:", "AIA module should expose optional archive webhook configuration"),
+        ("archive_url={{{归档Webhook}}}", "AIA hooks should forward archive webhook argument"),
     ]
     for needle, message in aia_checks:
         if needle not in aia_text:
@@ -569,7 +575,7 @@ def check_file_capture_modules() -> list[Issue]:
                 issues.append(Issue(path, 1, message))
 
     script_checks = [
-        ("Surge File Capture v2", "script should identify the v2 file-capture implementation"),
+        ("Surge File Capture v3", "script should identify the v3 file-capture implementation"),
         ("SECRET_QUERY_KEYS", "script should redact sensitive query parameters"),
         ("sanitizeUrl", "script should sanitize stored/exported URLs"),
         ("requires-body", "script comments should document metadata-only operation"),
@@ -580,6 +586,9 @@ def check_file_capture_modules() -> list[Issue]:
         ("cashValueTable", "script should map AIA cashValueTable material field"),
         ("productInstruction", "script should map AIA productInstruction material field"),
         ("csvEscape", "script should support safe CSV export"),
+        ("finishAfterArchive", "script should optionally forward new captures to an archive webhook"),
+        ("archive_token", "script should support bearer-token archive webhook auth"),
+        ("downloadUrl", "script should send a non-persisted download URL to archive webhook"),
         ("$done({});", "script should fail open for response hooks"),
     ]
     for needle, message in script_checks:
@@ -597,14 +606,29 @@ def check_file_capture_modules() -> list[Issue]:
     if "typeof res.body === 'string' ? res.body : ''" not in script_text:
         issues.append(Issue(FILE_CAPTURE_SCRIPT, 1, "context hook should read text body defensively and only when Surge supplied it"))
 
+    archive_server_checks = [
+        ("FILE_ARCHIVE_TOKEN", "archive server should support bearer token auth"),
+        ("FILE_ARCHIVE_ALLOWED_HOST_SUFFIXES", "archive server should support host allowlisting"),
+        ("ipaddress.ip_address", "archive server should validate resolved IP addresses"),
+        ("blocked non-public address", "archive server should block private/loopback downloads by default"),
+        ("index.csv", "archive server should maintain a CSV index"),
+        ("index.jsonl", "archive server should maintain a JSONL index"),
+        ("--self-test", "archive server should provide a local integration self-test"),
+    ]
+    for needle, message in archive_server_checks:
+        if needle not in archive_server_text:
+            issues.append(Issue(FILE_ARCHIVE_SERVER, 1, message))
+
     doc_checks = [
         ("不进入主 `Surge.conf` 默认启用", "docs should state file-capture modules are optional"),
         ("requires-body=false,max-size=0", "docs should disclose metadata-only binary handling"),
         ("www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "docs should disclose AIA MITM scope"),
         ("QUERY=redact", "docs should document query redaction"),
         ("CSV", "docs should document CSV export"),
+        ("归档 webhook", "docs should document server-side file archiving"),
+        ("FILE_ARCHIVE_TOKEN", "docs should document archive service token configuration"),
         ("不保存 Cookie", "docs should state cookies/request headers are not saved"),
-        ("不做文件下载器", "docs should state non-goals"),
+        ("Surge 模块本体不直接下载二进制文件", "docs should clarify download behavior"),
     ]
     for needle, message in doc_checks:
         if needle not in doc_text:

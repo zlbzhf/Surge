@@ -1,5 +1,5 @@
-// Surge File Capture v2
-// Metadata-only file detector + optional AIA product context harvester.
+// Surge File Capture v3
+// Metadata-only file detector + optional AIA product context harvester + optional archive webhook.
 // Safe defaults: capture hooks use requires-body=false/max-size=0, no response rewrite, bounded storage.
 
 const STORE_KEY = 'surge.file_capture.items.v2';
@@ -242,6 +242,60 @@ function upsertItems(newItems, keep) {
   return merged.slice(0, keep);
 }
 
+function filterNewItems(newItems) {
+  const incoming = (Array.isArray(newItems) ? newItems : [newItems]).filter(Boolean);
+  if (!incoming.length) return [];
+  const seen = {};
+  readItems().forEach((item) => {
+    const key = fingerprint(item);
+    if (key) seen[key] = true;
+  });
+  const out = [];
+  incoming.forEach((item) => {
+    const key = fingerprint(item);
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    out.push(item);
+  });
+  return out;
+}
+
+function archiveEndpoint(args) {
+  const url = String(args.archive_url || args.archive_webhook || args.webhook || '').trim();
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
+function archivePayloadItem(item) {
+  const out = {};
+  ['ts', 'kind', 'filename', 'ext', 'materialType', 'productName', 'productCode', 'size', 'contentType', 'status', 'host', 'url', 'downloadUrl', 'source', 'sourceUrl', 'pageTitle'].forEach((key) => {
+    if (item && item[key] !== undefined && item[key] !== null && String(item[key]) !== '') out[key] = item[key];
+  });
+  return out;
+}
+
+function finishAfterArchive(items, args, event, doneValue) {
+  const endpoint = archiveEndpoint(args || {});
+  const archiveItems = (Array.isArray(items) ? items : [items]).filter(Boolean);
+  if (!endpoint || !archiveItems.length || typeof $httpClient === 'undefined') {
+    $done(doneValue || {});
+    return;
+  }
+  const token = String((args || {}).archive_token || (args || {}).archive_key || '').trim();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const body = JSON.stringify({
+    schema: 'surge-file-capture.archive.v1',
+    event: event || 'capture',
+    sentAt: nowIso(),
+    items: archiveItems.map(archivePayloadItem),
+  });
+  $httpClient.post({ url: endpoint, headers, body, timeout: 5 }, function (error, response) {
+    if (error) console.log(`[File Capture] archive webhook failed: ${error}`);
+    else if (response && response.status && response.status >= 400) console.log(`[File Capture] archive webhook HTTP ${response.status}`);
+    $done(doneValue || {});
+  });
+}
+
 function rememberContexts(contexts, keep) {
   const incoming = (Array.isArray(contexts) ? contexts : [contexts]).filter((ctx) => ctx && (ctx.productName || ctx.title || ctx.productCode));
   if (!incoming.length) return readContexts();
@@ -338,13 +392,14 @@ function capture() {
     return;
   }
   attachContext(item, ttl);
+  const newItems = filterNewItems(item).map((entry) => Object.assign({}, entry, { downloadUrl: req.url || entry.url }));
   upsertItems(item, keep);
   if (notify) {
     const title = item.productName ? `捕获：${item.productName}` : 'Surge 捕获文件';
     const sub = `${item.materialType || item.kind.toUpperCase()} · ${fmtBytes(item.size)}`;
     $notification.post(title, sub, `${item.filename}\n${item.host}`, { url: req.url || item.url });
   }
-  $done({});
+  finishAfterArchive(newItems, args, 'response', {});
 }
 
 function objectString(obj, keys) {
@@ -507,12 +562,13 @@ function contextCapture() {
     embedded = embedded.concat(extractEmbeddedLinks(body, req.url || '', current));
   }
   if (contexts.length) rememberContexts(contexts, keepContext);
+  const newEmbedded = embedded.length ? filterNewItems(embedded).map((entry) => Object.assign({}, entry, { downloadUrl: entry.url })) : [];
   if (embedded.length) upsertItems(embedded, keep);
   if (notify && (contexts.length || embedded.length)) {
     const c = contexts[0] || {};
     $notification.post('Surge 文件上下文', c.productName || c.title || '已记录页面上下文', embedded.length ? `发现 ${embedded.length} 个文件链接` : '等待后续文件响应关联', { url: req.url || '' });
   }
-  $done({});
+  finishAfterArchive(newEmbedded, args, 'context', {});
 }
 
 function panel() {

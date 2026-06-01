@@ -135,6 +135,7 @@
 
 - 浏览网页或 App 时临时记录图片、PDF、Office、压缩包、媒体文件 URL。
 - 通过 Surge 面板导出 CSV，继续整理产品资料索引。
+- 可选接入自建归档 webhook，把捕获到的新文件下载到 VPS/电脑并按产品/资料类型建目录。
 - 对 AIA 产品页/API 做窄域上下文关联，补全公开披露资料 URL。
 
 建议：
@@ -142,6 +143,7 @@
 - 通用模块默认不附带 MITM hostname；只在需要的网站上单独开启。
 - AIA 专用模块只保留 `www/cws/nav.aia.com.cn` 三个 hostname，不扩大到 `hostname=*`。
 - 捕获脚本不保存 Cookie、请求头、账号信息或响应正文。
+- 归档服务必须配 token 和域名 allowlist；不要开放无认证下载代理。
 
 ### 中文广告增强
 

@@ -5,8 +5,8 @@
 ## 当前模块
 
 - `bilibili-bsbsb.sgmodule` — BilibiliSponsorBlock 空降助手；仅为 B 站 App 注入 bsbsb.top 空降点，不包含 B 站去广告或账号相关改写。
-- `file-capture.sgmodule` — 通用文件捕获面板；默认不追加 MITM，只用响应 URL/headers 识别图片、PDF、Office、压缩包和媒体文件。
-- `aia-file-capture.sgmodule` — AIA 友邦文件捕获；窄域 MITM `www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn`，把产品上下文和 PDF/图片资料关联起来。
+- `file-capture.sgmodule` — 通用文件捕获面板；默认不追加 MITM，只用响应 URL/headers 识别图片、PDF、Office、压缩包和媒体文件；可选接入归档 webhook 保存文件。
+- `aia-file-capture.sgmodule` — AIA 友邦文件捕获；窄域 MITM `www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn`，把产品上下文和 PDF/图片资料关联起来，并可发给归档服务按产品整理。
 
 ## 使用方式
 
