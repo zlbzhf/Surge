@@ -558,13 +558,18 @@ def check_file_capture_modules() -> list[Issue]:
         ("requires-body=1,max-size=1048576", "AIA context hook should cap text/API body reads at 1MB"),
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn", "AIA MITM scope should stay limited to the three AIA hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
-        ("#!arguments=token=", "AIA module should expose only one editable token field for maximum Surge compatibility"),
         ("archive_url=https%3A%2F%2Faia.zuiai.ggff.net%2Farchive", "AIA module should hard-code the archive endpoint to avoid multi-argument editor failures"),
-        ("archive_token=%token%", "AIA hooks should forward the single editable token field"),
-        ("?cb=aia-token-v1", "AIA script path should cache-bust the external script URL"),
+        ("?cb=aia-no-token-v1", "AIA script path should cache-bust the no-token test module URL"),
     ]
     for needle, message in aia_checks:
         if needle not in aia_text:
+            issues.append(Issue(AIA_FILE_CAPTURE_MODULE, 1, message))
+    for needle, message in [
+        ("#!arguments", "AIA no-token test module should not expose an empty editable parameter table"),
+        ("archive_token", "AIA no-token test module should not forward an archive token"),
+        ("%token%", "AIA no-token test module should not include unresolved token placeholders"),
+    ]:
+        if needle in aia_text:
             issues.append(Issue(AIA_FILE_CAPTURE_MODULE, 1, message))
 
     forbidden_module_needles = [

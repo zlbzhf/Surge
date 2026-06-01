@@ -104,10 +104,10 @@ archive_url = https://你的域名/archive
 archive_token = 换成强随机token
 ```
 
-AIA 专用版为兼容部分 Surge 客户端的参数编辑器，只保留一个可编辑字段，归档地址已固定为 `https://aia.zuiai.ggff.net/archive`：
+AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档地址已固定为 `https://aia.zuiai.ggff.net/archive`，请求不附带 `archive_token`。
 
 ```text
-token = 换成强随机token
+安装模块即可，无需填写 token 参数。
 ```
 
 保存后的目录示例：
@@ -133,7 +133,7 @@ token = 换成强随机token
 - `FILE_ARCHIVE_MAX_BYTES`：单文件最大字节数，默认 80MB。
 - `FILE_ARCHIVE_HOST` / `FILE_ARCHIVE_PORT`：监听地址和端口。
 
-建议通过 Nginx/Caddy 提供 HTTPS；不要裸奔暴露无 token 的归档服务。通用抓取可把 allowlist 扩大到需要的网站，AIA 抓取建议只允许 `www.aia.com.cn,nav.aia.com.cn,cws.aia.com.cn`。
+建议通过 Nginx/Caddy 提供 HTTPS；不要长期裸奔暴露无 token 的归档服务。通用抓取可把 allowlist 扩大到需要的网站，AIA 抓取建议只允许 `www.aia.com.cn,nav.aia.com.cn,cws.aia.com.cn`。
 
 ## 参数
 
@@ -147,10 +147,7 @@ token = 换成强随机token
 - `archive_url`：可选；填归档服务地址后，新文件元数据会 POST 到服务端下载保存。
 - `archive_token`：可选；作为 Bearer token 发送。
 
-AIA 专用版额外参数：
-
-- `token`：归档服务 Bearer token。
-- 其他参数固定为安全默认值：`keep=160`、`keep_context=60`、`notify=1`、`context_notify=0`、`harvest_links=1`、`query=redact`。
+AIA 专用版当前不暴露额外参数；固定使用安全默认值：`keep=160`、`keep_context=60`、`notify=1`、`context_notify=0`、`harvest_links=1`、`query=redact`。
 
 ## 非目标
 
