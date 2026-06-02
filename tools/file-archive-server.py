@@ -24,6 +24,7 @@ import re
 import shutil
 import socket
 import struct
+import subprocess
 import tempfile
 import threading
 import time
@@ -64,9 +65,11 @@ FILE_EXTENSIONS = {
     "mp4", "mov", "m4v", "mkv", "webm", "avi", "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus",
     "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
 }
-MATERIAL_HINT_RE = re.compile(r"一图|一图读懂|一张图|图解|宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|投保须知|停售|后续服务|公开披露|资料", re.I)
+MATERIAL_HINT_RE = re.compile(r"一图|一图读懂|一张图|图解|宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|营运规则|运营规则|operation\s+rules|投保须知|停售|后续服务|公开披露|资料", re.I)
 TEXT_PAGE_MAX_BYTES = 2 * 1024 * 1024
 GENERIC_MATERIALS = {"", "文件", "image", "图片", "待确认", "资料"}
+IMAGE_MATERIALS = {"一图", "宣传彩页", "产品彩页"}
+SMALL_IMAGE_MAX_DIMENSION = 500
 
 
 @dataclass
@@ -281,18 +284,62 @@ def infer_image_material(item: dict[str, Any], original_name: str, raw_url: str,
         return "一图", "high", "explicit_one_picture_signal"
     if re.search(r"宣传彩页|产品彩页|彩页|brochure|leaflet|flyer|color\s*page|colorpage|poster", text, re.I):
         return "宣传彩页", "high", "explicit_brochure_signal"
-    if current_material and current_material not in GENERIC_MATERIALS:
-        return current_material, "high", "explicit_context_material"
+    if current_material in IMAGE_MATERIALS:
+        return current_material, "high", "explicit_image_context_material"
     size = int(item.get("size") or 0)
-    if size and size < 80 * 1024:
-        return "忽略小图标", "low", "small_generic_image"
     width = int(detected.get("width") or 0)
     height = int(detected.get("height") or 0)
+    if width and height and width <= SMALL_IMAGE_MAX_DIMENSION and height <= SMALL_IMAGE_MAX_DIMENSION:
+        return "忽略小图标", "low", "small_square_image"
+    if size and size < 80 * 1024:
+        return "忽略小图标", "low", "small_generic_image"
     if width >= 700 and height >= width * 3:
-        return "待确认图片资料", "low", "tall_image_without_explicit_label"
+        return "一图", "medium", "tall_image_dimension_signal"
+    if width >= 1200 and height >= 900 and 0.55 <= (height / width) <= 1.2:
+        return "宣传彩页", "medium", "large_landscape_image_dimension_signal"
     if width >= 1200 and height >= 900:
         return "待确认图片资料", "low", "large_document_like_image_without_explicit_label"
     return "待确认图片资料", "low", "generic_image_without_material_label"
+
+
+def extract_pdf_text(path: Path, max_pages: int = 2) -> str:
+    """Extract a small amount of PDF text for material classification."""
+    if shutil.which("pdftotext") is None:
+        return ""
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-f", "1", "-l", str(max_pages), "-layout", str(path), "-"],
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.decode("utf-8", "ignore")[:20000]
+
+
+def infer_pdf_material_from_text(text: str, current_material: str = "") -> tuple[str, str, str]:
+    normalized = re.sub(r"\s+", " ", html.unescape(text or "")).strip()
+    if not normalized:
+        return current_material, "", ""
+    title_region = normalized[:3000]
+    if re.search(r"OPERATION\s+RULES|Operation\s+rules|营运规则|运营规则", title_region, re.I):
+        return "营运规则", "high", "pdf_text_operation_rules"
+    if re.search(r"产品说明书|产品说明", title_region):
+        return "产品说明书", "high", "pdf_text_product_instruction"
+    if re.search(r"费率表|保险费率|premium\s+rate|rate\s+table", title_region, re.I):
+        return "费率表", "high", "pdf_text_rate_table"
+    if re.search(r"请扫描以查询验证条款|在本条款中|本保险条款|保险条款|产品条款|terms|clause", title_region, re.I):
+        return "产品条款", "high", "pdf_text_product_clause"
+    if re.search(r"现金价值全表|现金价值表|现金价值.*利益.*表", title_region):
+        return "现金价值全表", "high", "pdf_text_cash_value"
+    return current_material, "", ""
+
+
+def infer_pdf_material_from_file(path: Path, current_material: str = "") -> tuple[str, str, str]:
+    return infer_pdf_material_from_text(extract_pdf_text(path), current_material)
 
 
 def readable_filename(product: str, material: str, sha256: str, ext: str) -> str:
@@ -641,6 +688,12 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
             material = "待确认PDF资料" if final_kind == "pdf" and raw_material in GENERIC_MATERIALS else raw_material
             confidence = ""
             reason = ""
+            if final_kind == "pdf":
+                pdf_material, pdf_confidence, pdf_reason = infer_pdf_material_from_file(Path(temp_name), material)
+                if pdf_reason and pdf_material:
+                    material = sanitize_name(pdf_material, material or "待确认PDF资料")
+                    confidence = pdf_confidence
+                    reason = pdf_reason
             if final_kind == "image":
                 image_item = dict(item)
                 image_item["size"] = size
@@ -726,11 +779,16 @@ class ArchiveHandler(http.server.BaseHTTPRequestHandler):
 
     def send_json(self, status: int, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # Mobile clients/proxies may disconnect after the server has finished
+            # processing. Do not turn that into noisy journalctl tracebacks.
+            return
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path in {"/", "/health"}:

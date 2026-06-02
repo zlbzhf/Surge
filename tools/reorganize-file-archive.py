@@ -101,6 +101,12 @@ def planned_record(root: Path, sha: str, paths: list[Path], records: list[dict[s
     confidence = str(rec.get("classification_confidence") or "")
     reason = str(rec.get("classification_reason") or "")
     material = "待确认PDF资料" if final_kind == "pdf" and raw_material in GENERIC_MATERIALS else raw_material
+    if final_kind == "pdf":
+        pdf_material, pdf_confidence, pdf_reason = server.infer_pdf_material_from_file(source_path, material)
+        if pdf_reason and pdf_material:
+            material = server.sanitize_name(pdf_material, material or "待确认PDF资料")
+            confidence = pdf_confidence
+            reason = pdf_reason
     if final_kind == "image":
         item = {
             "materialType": raw_material,
