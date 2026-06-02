@@ -598,6 +598,31 @@ function buildFileItem(rawUrl, options) {
   return item;
 }
 
+function hasStrongImageMaterialContext(item) {
+  if (!item || item.kind !== 'image') return false;
+  const text = safeDecode([item.filename, item.url, item.sourceUrl, item.materialType, item.pageTitle].join(' '));
+  return AIA_EXPLICIT_IMAGE_MATERIAL_RE.test(text) || Boolean(item.productName && item.materialType);
+}
+
+function isLikelyUiImage(item) {
+  if (!item || item.kind !== 'image' || hasStrongImageMaterialContext(item)) return false;
+  const name = safeDecode(String(item.filename || '')).toLowerCase();
+  const url = safeDecode(String(item.url || '')).toLowerCase();
+  const text = `${name} ${url}`;
+  if (/\.(svg|gif)$/i.test(name)) return true;
+  if (/^(default|placeholder|loading|avatar|user|man|woman|male|female)[-_a-z0-9]*\.(?:png|jpe?g|webp)$/i.test(name)) return true;
+  if (/^\d{4,8}(?:_\d{1,6})?\.png$/i.test(name)) return true;
+  if (/(^|[\/_-])(icon|icons|logo|logos|sprite|sprites|avatar|avatars|thumb|thumbnail|btn|button|tab|menu|close|arrow|back|home|search|share|wechat|weixin)([\/_\.-]|$)/i.test(text)) return true;
+  return false;
+}
+
+function shouldSkipCaptureItem(item, minBytes) {
+  if (!item) return true;
+  if (item.kind !== 'image') return false;
+  if (!hasStrongImageMaterialContext(item) && minBytes && item.size && item.size < minBytes) return true;
+  return isLikelyUiImage(item);
+}
+
 function capture() {
   const args = parseArgs(typeof $argument === 'string' ? $argument : '');
   const keep = Math.max(1, Math.min(800, asInt(args.keep) || DEFAULT_KEEP));
@@ -609,11 +634,15 @@ function capture() {
   const req = typeof $request !== 'undefined' ? $request : {};
   const res = typeof $response !== 'undefined' ? $response : {};
   const item = buildFileItem(req.url || '', { headers: res.headers || {}, status: res.status || 0, source: 'response', queryMode });
-  if (!item || !allowed.has(item.kind) || (minBytes && item.size && item.size < minBytes)) {
+  if (!item || !allowed.has(item.kind)) {
     $done({});
     return;
   }
   attachContext(item, ttl);
+  if (shouldSkipCaptureItem(item, minBytes)) {
+    $done({});
+    return;
+  }
   const newItems = filterNewItems(item).map((entry) => Object.assign({}, entry, { downloadUrl: req.url || entry.url }));
   upsertItems(item, keep);
   if (notify) {
