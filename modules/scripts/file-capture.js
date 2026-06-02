@@ -598,29 +598,74 @@ function buildFileItem(rawUrl, options) {
   return item;
 }
 
+function itemUrlParts(item) {
+  const raw = String((item && (item.downloadUrl || item.url || item.sourceUrl)) || '');
+  const u = safeUrl(raw);
+  let host = u ? u.hostname : String((item && item.host) || '').split(':')[0];
+  let pathname = u ? u.pathname : '';
+  if (!pathname && raw) {
+    const match = raw.match(/^https?:\/\/[^/?#]+([^?#]*)/i);
+    if (match) pathname = match[1] || '/';
+  }
+  return { host: String(host || '').toLowerCase(), pathname: safeDecode(pathname || '').toLowerCase() };
+}
+
+function isAiaHostName(host) {
+  const h = String(host || '').split(':')[0].toLowerCase();
+  return /(^|\.)aia\.com\.cn$/i.test(h) || h === '01000001.h5.aia.com' || /(^|\.)h5\.aia\.com$/i.test(h);
+}
+
+function imageContextText(item) {
+  const parts = [item && item.filename, item && item.url, item && item.sourceUrl, item && item.materialType, item && item.pageTitle];
+  ['appContext', 'sopContext', 'context'].forEach((key) => {
+    const ctx = item && item[key];
+    if (!ctx) return;
+    parts.push(ctx.materialType, ctx.clauseName, ctx.eventName, ctx.title, ctx.policyListName, ctx.productName);
+  });
+  return safeDecode(parts.filter(Boolean).join(' '));
+}
+
+function hasExplicitImageMaterialContext(item) {
+  return Boolean(item && item.kind === 'image' && AIA_EXPLICIT_IMAGE_MATERIAL_RE.test(imageContextText(item)));
+}
+
+function isAiaProductMaterialImagePath(item) {
+  const parts = itemUrlParts(item);
+  return isAiaHostName(parts.host) && /\/sps\/sps_product_core\/static\/png\//i.test(parts.pathname);
+}
+
+function isAiaGenericCmsImagePath(item) {
+  const parts = itemUrlParts(item);
+  return isAiaHostName(parts.host) && /\/cms\/file\/images\//i.test(parts.pathname);
+}
+
 function hasStrongImageMaterialContext(item) {
   if (!item || item.kind !== 'image') return false;
-  const text = safeDecode([item.filename, item.url, item.sourceUrl, item.materialType, item.pageTitle].join(' '));
-  return AIA_EXPLICIT_IMAGE_MATERIAL_RE.test(text) || Boolean(item.productName && item.materialType);
+  return isAiaProductMaterialImagePath(item) || hasExplicitImageMaterialContext(item);
 }
 
 function isLikelyUiImage(item) {
-  if (!item || item.kind !== 'image' || hasStrongImageMaterialContext(item)) return false;
+  if (!item || item.kind !== 'image') return false;
+  if (isAiaProductMaterialImagePath(item)) return false;
   const name = safeDecode(String(item.filename || '')).toLowerCase();
   const url = safeDecode(String(item.url || '')).toLowerCase();
   const text = `${name} ${url}`;
   if (/\.(svg|gif)$/i.test(name)) return true;
   if (/^(default|placeholder|loading|avatar|user|man|woman|male|female)[-_a-z0-9]*\.(?:png|jpe?g|webp)$/i.test(name)) return true;
   if (/^\d{4,8}(?:_\d{1,6})?\.png$/i.test(name)) return true;
-  if (/(^|[\/_-])(icon|icons|logo|logos|sprite|sprites|avatar|avatars|thumb|thumbnail|btn|button|tab|menu|close|arrow|back|home|search|share|wechat|weixin)([\/_\.-]|$)/i.test(text)) return true;
+  if (/(^|[\/_-])(banner|banners|ad|ads|advert|activity|campaign|promo|promotion|kv|swiper|carousel|hero|icon|icons|logo|logos|sprite|sprites|avatar|avatars|thumb|thumbnail|btn|button|tab|menu|close|arrow|back|home|search|share|wechat|weixin)([\/_\.-]|$)/i.test(text)) return true;
+  if (isAiaGenericCmsImagePath(item) && !hasExplicitImageMaterialContext(item)) return true;
   return false;
 }
 
 function shouldSkipCaptureItem(item, minBytes) {
   if (!item) return true;
   if (item.kind !== 'image') return false;
-  if (!hasStrongImageMaterialContext(item) && minBytes && item.size && item.size < minBytes) return true;
-  return isLikelyUiImage(item);
+  const strong = hasStrongImageMaterialContext(item);
+  if (isLikelyUiImage(item)) return true;
+  if (isAiaHostName(itemUrlParts(item).host) && !strong) return true;
+  if (!strong && minBytes && item.size && item.size < minBytes) return true;
+  return false;
 }
 
 function capture() {

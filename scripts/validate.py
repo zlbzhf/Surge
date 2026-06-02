@@ -37,6 +37,7 @@ AIA_FILE_CAPTURE_MODULE = ROOT / "modules" / "aia-file-capture.sgmodule"
 FILE_CAPTURE_SCRIPT = ROOT / "modules" / "scripts" / "file-capture.js"
 FILE_CAPTURE_DOC = ROOT / "docs" / "modules" / "file-capture.md"
 FILE_ARCHIVE_SERVER = ROOT / "tools" / "file-archive-server.py"
+FILE_CAPTURE_TEST = ROOT / "tools" / "test-file-capture.js"
 GPL_LICENSE = ROOT / "modules" / "LICENSES" / "GPL-3.0.txt"
 BSBSB_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js"
 FILE_CAPTURE_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js"
@@ -517,7 +518,7 @@ def check_bsbsb_module() -> list[Issue]:
 def check_file_capture_modules() -> list[Issue]:
     """Validate file-capture optional modules keep metadata-only and narrow-MITM boundaries."""
     issues: list[Issue] = []
-    required_files = [FILE_CAPTURE_MODULE, AIA_FILE_CAPTURE_MODULE, FILE_CAPTURE_SCRIPT, FILE_CAPTURE_DOC, FILE_ARCHIVE_SERVER]
+    required_files = [FILE_CAPTURE_MODULE, AIA_FILE_CAPTURE_MODULE, FILE_CAPTURE_SCRIPT, FILE_CAPTURE_DOC, FILE_ARCHIVE_SERVER, FILE_CAPTURE_TEST]
     for path in required_files:
         if not path.exists():
             issues.append(Issue(path, 1, "missing file-capture optional module artifact"))
@@ -528,6 +529,7 @@ def check_file_capture_modules() -> list[Issue]:
     aia_text = AIA_FILE_CAPTURE_MODULE.read_text(encoding="utf-8")
     script_text = FILE_CAPTURE_SCRIPT.read_text(encoding="utf-8")
     archive_server_text = FILE_ARCHIVE_SERVER.read_text(encoding="utf-8")
+    test_text = FILE_CAPTURE_TEST.read_text(encoding="utf-8")
     doc_text = FILE_CAPTURE_DOC.read_text(encoding="utf-8")
 
     generic_checks = [
@@ -564,7 +566,7 @@ def check_file_capture_modules() -> list[Issue]:
         ("archive_url=https%3A%2F%2Faia.zuiai.ggff.net%2Farchive", "AIA module should hard-code the archive endpoint to avoid multi-argument editor failures"),
         ("retag_seconds=20", "AIA SOP diagnostic hook should retag late-arriving file/image responses"),
         ("min_bytes=80000", "AIA response capture should skip small UI images before archive webhook downloads"),
-        ("?cb=aia-file-archive-v6", "AIA script path should cache-bust the file archive classification module URL"),
+        ("?cb=aia-file-archive-v7", "AIA script path should cache-bust the file archive classification module URL"),
         ("archive_page=1", "AIA context hook should submit product pages for server-side file extraction"),
     ]
     for needle, message in aia_checks:
@@ -615,6 +617,9 @@ def check_file_capture_modules() -> list[Issue]:
         ("notify_diag", "script should notify diagnostic captures because panel content is hard to copy"),
         ("inferMaterialFromSopEvent", "script should infer material types from AIA SOP click events"),
         ("retagRecentFilesFromContext", "script should retroactively tag recent PDF/Office/image captures when SOP click events arrive late"),
+        ("isAiaProductMaterialImagePath", "script should allow AIA product-core material image paths"),
+        ("isAiaGenericCmsImagePath", "script should identify generic AIA CMS image/banner storage"),
+        ("hasExplicitImageMaterialContext", "script should require explicit image material context before archiving generic AIA images"),
         ("compactArchiveContext", "script should send structured app/SOP context to the archive webhook after redaction"),
         ("sopContext", "script should include SOP clause/policy context in retag archive payloads"),
         ("clauseName", "script should extract AIA SOP clauseName material labels"),
@@ -657,6 +662,17 @@ def check_file_capture_modules() -> list[Issue]:
         if needle not in archive_server_text:
             issues.append(Issue(FILE_ARCHIVE_SERVER, 1, message))
 
+    test_checks = [
+        ("tools/test-file-capture.js", "file-capture behavior test should identify itself"),
+        ("sps/sps_product_core/static/png", "file-capture test should keep AIA product-core material images"),
+        ("cms/file/images", "file-capture test should reject generic AIA CMS banner images"),
+        ("stale product/terms context", "file-capture test should reject stale context on generic CMS images"),
+        ("Explicit 一图/宣传彩页 context", "file-capture test should keep explicitly labeled image materials"),
+    ]
+    for needle, message in test_checks:
+        if needle not in test_text:
+            issues.append(Issue(FILE_CAPTURE_TEST, 1, message))
+
     doc_checks = [
         ("不进入主 `Surge.conf` 默认启用", "docs should state file-capture modules are optional"),
         ("requires-body=false,max-size=0", "docs should disclose metadata-only binary handling"),
@@ -673,6 +689,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("Surge 模块本体不直接下载二进制文件", "docs should clarify download behavior"),
         ("FILE_ARCHIVE_ASYNC", "docs should document async archive job configuration"),
         ("/jobs/{job_id}", "docs should document async job lookup"),
+        ("/sps/sps_product_core/static/png", "docs should document AIA product-material image allowlist"),
+        ("/cms/file/images", "docs should document generic AIA CMS banner/image suppression"),
     ]
     for needle, message in doc_checks:
         if needle not in doc_text:
