@@ -151,6 +151,58 @@ class ArchiveServerBehaviorTests(unittest.TestCase):
             self.assertEqual(record["classification_reason"], "pdf_text_operation_rules")
             self.assertTrue(expected.exists(), expected)
 
+    def test_async_runtime_accepts_job_and_completes_background_download(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source_dir = tmp_path / "source"
+            source_dir.mkdir()
+            pdf_path = source_dir / "异步归档测试.pdf"
+            pdf_path.write_bytes(make_pdf("ASYNC ARCHIVE TEST"))
+
+            source_server = socketserver.TCPServer(("127.0.0.1", 0), lambda *a, **kw: QuietHandler(*a, directory=str(source_dir), **kw))
+            port = source_server.server_address[1]
+            thread = threading.Thread(target=source_server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                archive_root = tmp_path / "archive"
+                config = server.ArchiveConfig(
+                    root=archive_root,
+                    token="",
+                    allowed_suffixes=("127.0.0.1",),
+                    allow_private=True,
+                    max_bytes=1024 * 1024,
+                    timeout=5,
+                    async_mode=True,
+                    queue_size=5,
+                )
+                runtime = server.ArchiveRuntime(config)
+                url = f"http://127.0.0.1:{port}/{urllib.parse.quote(pdf_path.name)}"
+                accepted = runtime.submit([
+                    {
+                        "productName": "友邦异步测试产品",
+                        "materialType": "产品条款",
+                        "kind": "pdf",
+                        "filename": pdf_path.name,
+                        "url": url,
+                        "downloadUrl": url,
+                        "source": "unit-test-async",
+                        "sopContext": {"policyListName": "友邦异步测试产品", "clauseName": "产品条款"},
+                    }
+                ])
+                self.assertIn(accepted["status"], {"queued", "running", "completed"})
+                self.assertEqual(accepted["accepted"], 1)
+                runtime.queue.join()
+                snapshot = runtime.snapshot(accepted["job_id"])
+            finally:
+                source_server.shutdown()
+                source_server.server_close()
+
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(snapshot["status"], "completed")
+            self.assertEqual(snapshot["saved"], 1)
+            self.assertTrue((archive_root / "index.csv").exists())
+            self.assertTrue((archive_root / "archive-jobs.jsonl").exists())
+
     def test_send_json_suppresses_client_broken_pipe(self) -> None:
         class BrokenWriter:
             def write(self, data: bytes) -> int:

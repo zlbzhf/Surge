@@ -562,8 +562,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.aia.com, mpaas-mgw-fin.cn-shanghai.aliyuncs.com, sop.aia.com.cn, nav-st.aia.com.cn, nav-uat.aia.com.cn", "AIA MITM scope should stay limited to the approved AIA/H5/mPaaS diagnostic hosts"),
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
         ("archive_url=https%3A%2F%2Faia.zuiai.ggff.net%2Farchive", "AIA module should hard-code the archive endpoint to avoid multi-argument editor failures"),
-        ("retag_seconds=20", "AIA SOP diagnostic hook should retag late-arriving PDF/Office responses"),
-        ("?cb=aia-file-archive-v4", "AIA script path should cache-bust the file archive classification module URL"),
+        ("retag_seconds=20", "AIA SOP diagnostic hook should retag late-arriving file/image responses"),
+        ("?cb=aia-file-archive-v5", "AIA script path should cache-bust the file archive classification module URL"),
         ("archive_page=1", "AIA context hook should submit product pages for server-side file extraction"),
     ]
     for needle, message in aia_checks:
@@ -613,7 +613,11 @@ def check_file_capture_modules() -> list[Issue]:
         ("parseSopTelemetry", "script should extract AIA SOP telemetry title/product metadata"),
         ("notify_diag", "script should notify diagnostic captures because panel content is hard to copy"),
         ("inferMaterialFromSopEvent", "script should infer material types from AIA SOP click events"),
-        ("retagRecentFilesFromContext", "script should retroactively tag recent PDF/Office captures when SOP click events arrive late"),
+        ("retagRecentFilesFromContext", "script should retroactively tag recent PDF/Office/image captures when SOP click events arrive late"),
+        ("compactArchiveContext", "script should send structured app/SOP context to the archive webhook after redaction"),
+        ("sopContext", "script should include SOP clause/policy context in retag archive payloads"),
+        ("clauseName", "script should extract AIA SOP clauseName material labels"),
+        ("policyListName", "script should extract AIA SOP policyListName product labels"),
         ("宣传彩页", "script should classify product brochure links by anchor text"),
         ("$done({});", "script should fail open for response hooks"),
     ]
@@ -643,6 +647,10 @@ def check_file_capture_modules() -> list[Issue]:
         ("HTMLParser", "archive server should parse product page links without third-party dependencies"),
         ("page-crawl", "archive server should mark files discovered from product pages"),
         ("--self-test", "archive server should provide a local integration self-test"),
+        ("FILE_ARCHIVE_ASYNC", "archive server should default to async archive jobs"),
+        ("ArchiveRuntime", "archive server should have a bounded background job runtime"),
+        ("/jobs/{job_id}", "archive server should expose job lookup semantics in responses"),
+        ("202", "archive server should return HTTP 202 when async work is accepted"),
     ]
     for needle, message in archive_server_checks:
         if needle not in archive_server_text:
@@ -662,6 +670,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("FILE_ARCHIVE_TOKEN", "docs should document archive service token configuration"),
         ("不保存 Cookie", "docs should state cookies/request headers are not saved"),
         ("Surge 模块本体不直接下载二进制文件", "docs should clarify download behavior"),
+        ("FILE_ARCHIVE_ASYNC", "docs should document async archive job configuration"),
+        ("/jobs/{job_id}", "docs should document async job lookup"),
     ]
     for needle, message in doc_checks:
         if needle not in doc_text:

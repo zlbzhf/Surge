@@ -271,6 +271,8 @@ function parseSopTelemetry(rawUrl) {
       eventName: objectString(payload, ['event_name', 'old_event_log_value']),
       description: objectString(payload, ['old_event_log_description', 'sourcePage', 'subApplicationName']),
       pageUrl: objectString(payload, ['url']),
+      policyListName: objectString(payload, ['policyListName']),
+      clauseName: objectString(payload, ['clauseName', 'policyClauseName', 'materialName', 'materialType', 'name']),
       productName: objectString(payload, ['policyListName', 'productName', 'productCName', 'productFullName']),
       platformType: objectString(payload, ['platformType']),
     };
@@ -402,11 +404,28 @@ function archiveEndpoint(args) {
   return /^https?:\/\//i.test(url) ? url : '';
 }
 
+function compactArchiveContext(ctx) {
+  if (!ctx) return null;
+  const out = {};
+  ['ts', 'productName', 'productCode', 'materialType', 'title', 'eventName', 'policyListName', 'clauseName', 'source', 'host', 'root'].forEach((key) => {
+    if (ctx[key] !== undefined && ctx[key] !== null && String(ctx[key]) !== '') out[key] = String(ctx[key]).slice(0, 220);
+  });
+  if (ctx.sourceUrl) out.sourceUrl = sanitizeDiagnosticUrl(ctx.sourceUrl);
+  if (ctx.pageUrl) out.pageUrl = sanitizeDiagnosticUrl(ctx.pageUrl);
+  return Object.keys(out).length ? out : null;
+}
+
 function archivePayloadItem(item) {
   const out = {};
   ['ts', 'kind', 'filename', 'ext', 'materialType', 'productName', 'productCode', 'size', 'contentType', 'status', 'host', 'url', 'downloadUrl', 'source', 'sourceUrl', 'pageTitle'].forEach((key) => {
     if (item && item[key] !== undefined && item[key] !== null && String(item[key]) !== '') out[key] = item[key];
   });
+  const appContext = compactArchiveContext(item && item.appContext);
+  const sopContext = compactArchiveContext(item && item.sopContext);
+  const context = compactArchiveContext(item && item.context);
+  if (appContext) out.appContext = appContext;
+  if (sopContext) out.sopContext = sopContext;
+  if (context) out.context = context;
   return out;
 }
 
@@ -477,6 +496,11 @@ function attachContext(item, ttlMinutes) {
   if (!item.materialType && best.materialType) item.materialType = best.materialType;
   if (!item.pageTitle && best.title) item.pageTitle = best.title;
   if (!item.sourceUrl && best.sourceUrl) item.sourceUrl = best.sourceUrl;
+  const archiveContext = compactArchiveContext(best);
+  if (archiveContext) {
+    item.appContext = archiveContext;
+    if (/sop/i.test(String(best.source || ''))) item.sopContext = archiveContext;
+  }
   return item;
 }
 
@@ -524,6 +548,14 @@ function retagRecentFilesFromContext(ctx, options) {
     if (!next.sourceUrl && ctx.sourceUrl) {
       clone();
       next.sourceUrl = ctx.sourceUrl;
+    }
+    if (ctx) {
+      const archiveContext = compactArchiveContext(ctx);
+      if (archiveContext) {
+        clone();
+        next.appContext = archiveContext;
+        if (/sop/i.test(String(ctx.source || ''))) next.sopContext = archiveContext;
+      }
     }
     if (next !== item) changed.push(Object.assign({}, next, { downloadUrl: next.downloadUrl || next.url }));
     return next;
@@ -862,7 +894,7 @@ function diagnosticCapture() {
     });
   } else if (/sop\.aia\.com\.cn$/i.test(host)) {
     const telemetry = parseSopTelemetry(req.url || '') || {};
-    const materialHint = inferMaterialFromSopEvent(telemetry.eventName || '', telemetry.title || '', telemetry.description || '');
+    const materialHint = inferMaterialFromSopEvent(telemetry.eventName || '', telemetry.title || '', [telemetry.description || '', telemetry.clauseName || '', telemetry.policyListName || ''].join(' '));
     item = buildDiagnosticItem({
       url: req.url || '',
       host,
@@ -875,7 +907,7 @@ function diagnosticCapture() {
       productName: telemetry.productName || '',
       pageTitle: telemetry.title || '',
       eventName: telemetry.eventName || '',
-      detail: [materialHint ? `material=${materialHint}` : '', telemetry.description, telemetry.platformType, telemetry.pageUrl].filter(Boolean).join(' · '),
+      detail: [materialHint ? `material=${materialHint}` : '', telemetry.clauseName ? `clauseName=${telemetry.clauseName}` : '', telemetry.description, telemetry.platformType, telemetry.pageUrl].filter(Boolean).join(' · '),
     });
     if (telemetry.productName || telemetry.title) {
       const ctx = {
@@ -885,6 +917,9 @@ function diagnosticCapture() {
         title: telemetry.title || '',
         materialType: materialHint,
         eventName: telemetry.eventName || '',
+        policyListName: telemetry.policyListName || '',
+        clauseName: telemetry.clauseName || '',
+        pageUrl: telemetry.pageUrl || '',
         host,
         root: rootDomain(host),
         sourceUrl: sanitizeDiagnosticUrl(req.url || ''),

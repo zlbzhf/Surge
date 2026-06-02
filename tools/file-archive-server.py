@@ -20,6 +20,7 @@ import json
 import mimetypes
 import os
 import posixpath
+import queue
 import re
 import shutil
 import socket
@@ -29,6 +30,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import uuid
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -70,6 +72,8 @@ TEXT_PAGE_MAX_BYTES = 2 * 1024 * 1024
 GENERIC_MATERIALS = {"", "文件", "image", "图片", "待确认", "资料"}
 IMAGE_MATERIALS = {"一图", "宣传彩页", "产品彩页"}
 SMALL_IMAGE_MAX_DIMENSION = 500
+INDEX_LOCK = threading.Lock()
+JOB_LOG_NAME = "archive-jobs.jsonl"
 
 
 @dataclass
@@ -80,6 +84,8 @@ class ArchiveConfig:
     allow_private: bool
     max_bytes: int
     timeout: int
+    async_mode: bool = True
+    queue_size: int = 1000
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -106,6 +112,11 @@ def load_config(args: argparse.Namespace) -> ArchiveConfig:
         for s in suffixes_raw.split(",")
         if s.strip()
     )
+    async_mode = env_bool("FILE_ARCHIVE_ASYNC", True)
+    if getattr(args, "sync_mode", False):
+        async_mode = False
+    if getattr(args, "async_mode", False):
+        async_mode = True
     return ArchiveConfig(
         root=root,
         token=token,
@@ -113,6 +124,8 @@ def load_config(args: argparse.Namespace) -> ArchiveConfig:
         allow_private=bool(args.allow_private) or env_bool("FILE_ARCHIVE_ALLOW_PRIVATE", False),
         max_bytes=args.max_bytes or env_int("FILE_ARCHIVE_MAX_BYTES", DEFAULT_MAX_BYTES),
         timeout=args.timeout or env_int("FILE_ARCHIVE_TIMEOUT", DEFAULT_TIMEOUT),
+        async_mode=async_mode,
+        queue_size=args.queue_size or env_int("FILE_ARCHIVE_QUEUE_SIZE", 1000),
     )
 
 
@@ -274,12 +287,7 @@ def detect_magic(head: bytes, fallback_content_type: str, fallback_name: str) ->
 
 
 def infer_image_material(item: dict[str, Any], original_name: str, raw_url: str, detected: dict[str, Any], current_material: str) -> tuple[str, str, str]:
-    text = html.unescape(urllib.parse.unquote(" ".join([
-        str(item.get("materialType") or item.get("material_type") or ""),
-        str(item.get("filename") or ""), original_name, raw_url,
-        str(item.get("sourceUrl") or item.get("source_url") or ""),
-        str(item.get("pageTitle") or item.get("page_title") or ""),
-    ])))
+    text = context_text_for_item(item, original_name, raw_url)
     if re.search(r"一图|一图读懂|一张图|图解|one\s*page|onepage|infographic", text, re.I):
         return "一图", "high", "explicit_one_picture_signal"
     if re.search(r"宣传彩页|产品彩页|彩页|brochure|leaflet|flyer|color\s*page|colorpage|poster", text, re.I):
@@ -434,6 +442,8 @@ def infer_material_type(label: str, raw_url: str, fallback: str = "") -> str:
         return "产品合同"
     if re.search(r"产品条款|保险条款|条款|terms|clause", text, re.I):
         return "产品条款"
+    if re.search(r"营运规则|运营规则|operation\s+rules", text, re.I):
+        return "营运规则"
     if re.search(r"费率表|费率|rate", text, re.I):
         return "费率表"
     if "现金价值" in text:
@@ -445,6 +455,73 @@ def infer_material_type(label: str, raw_url: str, fallback: str = "") -> str:
     if re.search(r"停售|后续服务|follow", text, re.I):
         return "停售时间、停售原因及后续服务措施"
     return fallback or "文件"
+
+
+def iter_context_dicts(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return bounded, explicit app/SOP context dicts without raw auth/session data."""
+    out: list[dict[str, Any]] = [item]
+    for key in ("context", "appContext", "app_context", "sopContext", "sop_context", "sourceContext", "source_context", "latestContext", "latest_context"):
+        value = item.get(key)
+        if isinstance(value, dict):
+            out.append(value)
+        elif isinstance(value, str) and len(value) <= 8192:
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                out.append(parsed)
+    return out[:12]
+
+
+def first_context_value(item: dict[str, Any], keys: tuple[str, ...]) -> tuple[str, str]:
+    for ctx_i, ctx in enumerate(iter_context_dicts(item)):
+        for key in keys:
+            value = ctx.get(key)
+            if value is None:
+                continue
+            text = html.unescape(str(value)).strip()
+            if text:
+                source = key if ctx_i == 0 else f"context.{key}"
+                return text[:200], source
+    return "", ""
+
+
+def best_product_name(item: dict[str, Any]) -> tuple[str, str]:
+    return first_context_value(item, (
+        "productName", "product_name", "policyListName", "policy_list_name",
+        "policyName", "policy_name", "productTitle", "product_title", "product",
+    ))
+
+
+def best_material_label(item: dict[str, Any]) -> tuple[str, str]:
+    label, source = first_context_value(item, (
+        "clauseName", "clause_name", "materialType", "material_type",
+        "buttonText", "button_text", "linkText", "link_text", "text",
+    ))
+    if not label:
+        return "", ""
+    return infer_material_type(label, "", label), source
+
+
+def context_text_for_item(item: dict[str, Any], original_name: str, raw_url: str) -> str:
+    safe_keys = (
+        "materialType", "material_type", "clauseName", "clause_name", "filename",
+        "sourceUrl", "source_url", "pageTitle", "page_title", "title", "text",
+        "eventName", "event_name", "sourcePage", "source_page", "operationType", "operation_type",
+        "policyListName", "policyName", "productName", "product_name",
+    )
+    parts = [original_name, raw_url]
+    for ctx in iter_context_dicts(item):
+        for key in safe_keys:
+            value = ctx.get(key)
+            if value:
+                parts.append(str(value)[:240])
+    return html.unescape(urllib.parse.unquote(" ".join(parts)))
+
+
+def is_explicit_sop_source(source: str) -> bool:
+    return any(part in source.lower() for part in ("clausename", "sop", "context"))
 
 
 def strip_html_text(body: str) -> str:
@@ -632,14 +709,15 @@ def append_indexes(config: ArchiveConfig, record: dict[str, Any]) -> None:
     config.root.mkdir(parents=True, exist_ok=True)
     csv_path = config.root / "index.csv"
     jsonl_path = config.root / "index.jsonl"
-    write_header = not csv_path.exists()
-    with csv_path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=INDEX_FIELDS)
-        if write_header:
-            writer.writeheader()
-        writer.writerow({key: record.get(key, "") for key in INDEX_FIELDS})
-    with jsonl_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    with INDEX_LOCK:
+        write_header = not csv_path.exists()
+        with csv_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=INDEX_FIELDS)
+            if write_header:
+                writer.writeheader()
+            writer.writerow({key: record.get(key, "") for key in INDEX_FIELDS})
+        with jsonl_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
@@ -682,12 +760,14 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
                     f.write(chunk)
             sha256 = digest.hexdigest()
             detected = detect_magic(head, response.headers.get("Content-Type", ""), original_filename)
-            product = sanitize_name(item.get("productName") or item.get("product_name"), "未关联产品")
-            raw_material = sanitize_name(item.get("materialType") or item.get("material_type") or item.get("kind"), "文件")
+            product_value, product_source = best_product_name(item)
+            material_value, material_source = best_material_label(item)
+            product = sanitize_name(product_value, "未关联产品")
+            raw_material = sanitize_name(material_value or item.get("kind"), "文件")
             final_kind = detected.get("kind") or item.get("kind", "")
             material = "待确认PDF资料" if final_kind == "pdf" and raw_material in GENERIC_MATERIALS else raw_material
-            confidence = ""
-            reason = ""
+            confidence = "high" if material_source and raw_material not in GENERIC_MATERIALS else ""
+            reason = f"explicit_context_{material_source}" if confidence else ""
             if final_kind == "pdf":
                 pdf_material, pdf_confidence, pdf_reason = infer_pdf_material_from_file(Path(temp_name), material)
                 if pdf_reason and pdf_material:
@@ -711,7 +791,7 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
                         "size": size,
                         "sha256": sha256,
                         "relative_path": "",
-                        "source_url": str(item.get("url") or redact_url(final_url)),
+                        "source_url": redact_url(str(item.get("url") or final_url)),
                         "source": item.get("source", ""),
                         "action": "skipped_small_image",
                         "original_filename": original_filename,
@@ -755,7 +835,7 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
                 "size": size,
                 "sha256": sha256,
                 "relative_path": relative,
-                "source_url": str(item.get("url") or redact_url(final_url)),
+                "source_url": redact_url(str(item.get("url") or final_url)),
                 "source": item.get("source", ""),
                 "action": action,
                 "original_filename": original_filename,
@@ -770,9 +850,114 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
             raise
 
 
+def process_items(items: list[Any], config: ArchiveConfig) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    saved: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for item in items[:100]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            if item_is_page(item):
+                saved.extend(crawl_page_item(item, config))
+            else:
+                saved.append(download_one(item, config))
+        except Exception as exc:  # keep processing the batch
+            errors.append({
+                "filename": sanitize_name(item.get("filename") or "", ""),
+                "host": sanitize_name(item.get("host") or urllib.parse.urlparse(str(item.get("downloadUrl") or item.get("url") or "")).hostname or "", ""),
+                "error": str(exc)[:500],
+            })
+    return saved, errors
+
+
+def now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def append_job_event(config: ArchiveConfig, job: dict[str, Any]) -> None:
+    config.root.mkdir(parents=True, exist_ok=True)
+    event = {
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "accepted": job.get("accepted", 0),
+        "saved": job.get("saved", 0),
+        "error_count": len(job.get("errors") or []),
+    }
+    with INDEX_LOCK:
+        with (config.root / JOB_LOG_NAME).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+class ArchiveRuntime:
+    def __init__(self, config: ArchiveConfig) -> None:
+        self.config = config
+        self.queue: queue.Queue[tuple[str, list[Any]]] = queue.Queue(maxsize=config.queue_size)
+        self.jobs: dict[str, dict[str, Any]] = {}
+        self.lock = threading.Lock()
+        self.worker = threading.Thread(target=self._worker_loop, name="archive-worker", daemon=True)
+        self.worker.start()
+
+    def submit(self, items: list[Any]) -> dict[str, Any]:
+        job_id = time.strftime("%Y%m%d%H%M%S", time.gmtime()) + "-" + uuid.uuid4().hex[:8]
+        job = {
+            "job_id": job_id,
+            "status": "queued",
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+            "accepted": min(len(items), 100),
+            "saved": 0,
+            "errors": [],
+        }
+        with self.lock:
+            self.jobs[job_id] = job
+        try:
+            self.queue.put_nowait((job_id, items[:100]))
+        except queue.Full:
+            with self.lock:
+                self.jobs.pop(job_id, None)
+            raise
+        append_job_event(self.config, job)
+        return dict(job, queue_depth=self.queue.qsize())
+
+    def snapshot(self, job_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            return dict(job) if job else None
+
+    def _update(self, job_id: str, **updates: Any) -> dict[str, Any]:
+        with self.lock:
+            job = self.jobs.get(job_id, {"job_id": job_id, "created_at": now_iso(), "accepted": 0, "errors": []})
+            job.update(updates)
+            job["updated_at"] = now_iso()
+            self.jobs[job_id] = job
+            snapshot = dict(job)
+        append_job_event(self.config, snapshot)
+        return snapshot
+
+    def _worker_loop(self) -> None:
+        while True:
+            job_id, items = self.queue.get()
+            try:
+                self._update(job_id, status="running")
+                saved, errors = process_items(items, self.config)
+                self._update(
+                    job_id,
+                    status="completed" if not errors else "completed_with_errors",
+                    saved=len(saved),
+                    errors=errors,
+                )
+            except Exception as exc:
+                self._update(job_id, status="failed", errors=[{"error": str(exc)[:500]}])
+            finally:
+                self.queue.task_done()
+
+
 class ArchiveHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "SurgeFileArchive/1.0"
+    server_version = "SurgeFileArchive/1.1"
     config: ArchiveConfig
+    runtime: ArchiveRuntime | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {self.address_string()} {format % args}")
@@ -790,21 +975,48 @@ class ArchiveHandler(http.server.BaseHTTPRequestHandler):
             # processing. Do not turn that into noisy journalctl tracebacks.
             return
 
+    def is_authorized(self) -> bool:
+        if not self.config.token:
+            return True
+        return self.headers.get("Authorization", "") == f"Bearer {self.config.token}"
+
+    def require_auth(self) -> bool:
+        if self.is_authorized():
+            return True
+        self.send_json(401, {"ok": False, "error": "unauthorized"})
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
-        if self.path in {"/", "/health"}:
-            self.send_json(200, {"ok": True, "service": "surge-file-archive"})
-        else:
-            self.send_json(404, {"ok": False, "error": "not found"})
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in {"/", "/health"}:
+            queue_depth = self.runtime.queue.qsize() if self.runtime else 0
+            self.send_json(200, {
+                "ok": True,
+                "service": "surge-file-archive",
+                "version": "1.1",
+                "async": self.config.async_mode,
+                "queue_depth": queue_depth,
+            })
+            return
+        if parsed.path.startswith("/jobs/"):
+            if not self.require_auth():
+                return
+            job_id = parsed.path.rsplit("/", 1)[-1]
+            job = self.runtime.snapshot(job_id) if self.runtime else None
+            if not job:
+                self.send_json(404, {"ok": False, "error": "job not found"})
+                return
+            self.send_json(200, {"ok": True, "job": job})
+            return
+        self.send_json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if urllib.parse.urlparse(self.path).path not in {"/archive", "/"}:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path not in {"/archive", "/"}:
             self.send_json(404, {"ok": False, "error": "not found"})
             return
-        if self.config.token:
-            auth = self.headers.get("Authorization", "")
-            if auth != f"Bearer {self.config.token}":
-                self.send_json(401, {"ok": False, "error": "unauthorized"})
-                return
+        if not self.require_auth():
+            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -821,31 +1033,37 @@ class ArchiveHandler(http.server.BaseHTTPRequestHandler):
         if not isinstance(items, list):
             self.send_json(400, {"ok": False, "error": "payload.items must be a list"})
             return
-        saved: list[dict[str, Any]] = []
-        errors: list[dict[str, str]] = []
-        for item in items[:100]:
-            if not isinstance(item, dict):
-                continue
+        query = urllib.parse.parse_qs(parsed.query)
+        sync_requested = (query.get("sync", [""])[0].lower() in {"1", "true", "yes", "on"}) or bool(payload.get("sync"))
+        if self.config.async_mode and not sync_requested:
+            if not self.runtime:
+                self.send_json(503, {"ok": False, "error": "async runtime unavailable"})
+                return
             try:
-                if item_is_page(item):
-                    saved.extend(crawl_page_item(item, self.config))
-                else:
-                    saved.append(download_one(item, self.config))
-            except Exception as exc:  # keep processing the batch
-                errors.append({
-                    "filename": str(item.get("filename") or ""),
-                    "host": str(item.get("host") or ""),
-                    "error": str(exc),
-                })
+                job = self.runtime.submit(items)
+            except queue.Full:
+                self.send_json(503, {"ok": False, "error": "archive queue full"})
+                return
+            self.send_json(202, {
+                "ok": True,
+                "accepted": job.get("accepted", 0),
+                "job_id": job["job_id"],
+                "status": job["status"],
+                "queue_depth": job.get("queue_depth", 0),
+            })
+            return
+        saved, errors = process_items(items, self.config)
         self.send_json(200 if not errors else 207, {"ok": not errors, "saved": len(saved), "errors": errors, "items": saved})
 
 
 def run_server(config: ArchiveConfig, host: str, port: int) -> None:
-    handler_cls = type("ConfiguredArchiveHandler", (ArchiveHandler,), {"config": config})
+    runtime = ArchiveRuntime(config) if config.async_mode else None
+    handler_cls = type("ConfiguredArchiveHandler", (ArchiveHandler,), {"config": config, "runtime": runtime})
     config.root.mkdir(parents=True, exist_ok=True)
     with http.server.ThreadingHTTPServer((host, port), handler_cls) as httpd:
         print(f"Surge file archive server listening on http://{host}:{port}/archive")
         print(f"Archive root: {config.root}")
+        print(f"Async archive mode: {'on' if config.async_mode else 'off'}")
         if config.allowed_suffixes:
             print("Allowed host suffixes: " + ", ".join(config.allowed_suffixes))
         if not config.token:
@@ -864,6 +1082,8 @@ def run_self_test() -> None:
         brochure.write_bytes(b"%PDF-1.4\n% brochure\n")
         contract = source_dir / "产品合同.pdf"
         contract.write_bytes(b"%PDF-1.4\n% contract\n")
+        async_sample = source_dir / "异步测试条款.pdf"
+        async_sample.write_bytes(b"%PDF-1.4\n% async archive self test\n")
         nested_page = source_dir / "contract.html"
         nested_page.write_text('<html><body><a href="%E4%BA%A7%E5%93%81%E5%90%88%E5%90%8C.pdf">下载保险合同</a></body></html>', encoding="utf-8")
         product_page = source_dir / "product.html"
@@ -879,8 +1099,9 @@ def run_self_test() -> None:
         source_thread.start()
 
         archive_root = tmp_path / "archive"
-        config = ArchiveConfig(root=archive_root, token="test-token", allowed_suffixes=("127.0.0.1",), allow_private=True, max_bytes=1024 * 1024, timeout=5)
-        handler_cls = type("SelfTestArchiveHandler", (ArchiveHandler,), {"config": config})
+        config = ArchiveConfig(root=archive_root, token="test-token", allowed_suffixes=("127.0.0.1",), allow_private=True, max_bytes=1024 * 1024, timeout=5, async_mode=True)
+        runtime = ArchiveRuntime(config)
+        handler_cls = type("SelfTestArchiveHandler", (ArchiveHandler,), {"config": config, "runtime": runtime})
         archive_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
         archive_port = archive_server.server_address[1]
         archive_thread = threading.Thread(target=archive_server.serve_forever, daemon=True)
@@ -917,28 +1138,71 @@ def run_self_test() -> None:
             ],
         }
         req = urllib.request.Request(
-            f"http://127.0.0.1:{archive_port}/archive",
+            f"http://127.0.0.1:{archive_port}/archive?sync=1",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             headers={"Content-Type": "application/json", "Authorization": "Bearer test-token"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=5) as response:
             body = json.loads(response.read().decode("utf-8"))
+        async_payload = {
+            "schema": "surge-file-capture.archive.v1",
+            "items": [
+                {
+                    "productName": "友邦异步测试产品",
+                    "kind": "pdf",
+                    "filename": "异步测试条款.pdf",
+                    "url": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(async_sample.name)}?token=secret-token",
+                    "downloadUrl": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(async_sample.name)}",
+                    "source": "self-test-async",
+                    "sopContext": {"clauseName": "产品条款", "policyListName": "友邦异步测试产品"},
+                },
+            ],
+        }
+        async_req = urllib.request.Request(
+            f"http://127.0.0.1:{archive_port}/archive",
+            data=json.dumps(async_payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer test-token"},
+            method="POST",
+        )
+        with urllib.request.urlopen(async_req, timeout=5) as response:
+            assert response.status == 202, response.status
+            async_body = json.loads(response.read().decode("utf-8"))
+        job_id = async_body["job_id"]
+        job_body: dict[str, Any] = {}
+        for _ in range(30):
+            status_req = urllib.request.Request(
+                f"http://127.0.0.1:{archive_port}/jobs/{job_id}",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            with urllib.request.urlopen(status_req, timeout=5) as response:
+                job_body = json.loads(response.read().decode("utf-8"))
+            if job_body["job"]["status"] in {"completed", "completed_with_errors", "failed"}:
+                break
+            time.sleep(0.1)
         source_server.shutdown()
         archive_server.shutdown()
         sample_hash = hashlib.sha256(sample.read_bytes()).hexdigest()[:8]
         brochure_hash = hashlib.sha256(brochure.read_bytes()).hexdigest()[:8]
         contract_hash = hashlib.sha256(contract.read_bytes()).hexdigest()[:8]
+        async_hash = hashlib.sha256(async_sample.read_bytes()).hexdigest()[:8]
         expected = archive_root / "友邦测试产品" / "产品条款" / f"友邦测试产品_产品条款_{sample_hash}.pdf"
         expected_brochure = archive_root / "友邦测试产品" / "宣传彩页" / f"友邦测试产品_宣传彩页_{brochure_hash}.pdf"
         expected_contract = archive_root / "友邦测试产品" / "产品合同" / f"友邦测试产品_产品合同_{contract_hash}.pdf"
+        expected_async = archive_root / "友邦异步测试产品" / "产品条款" / f"友邦异步测试产品_产品条款_{async_hash}.pdf"
         unknown_sample = archive_root / "未关联产品" / "pdf" / f"未关联产品_pdf_{sample_hash}.pdf"
         assert expected.exists(), expected
         assert not unknown_sample.exists(), unknown_sample
         assert expected_brochure.exists(), expected_brochure
         assert expected_contract.exists(), expected_contract
+        assert expected_async.exists(), expected_async
+        assert job_body["job"]["status"] == "completed", job_body
         assert body["saved"] == 4, body
         assert (archive_root / "index.csv").exists()
+        index_text = (archive_root / "index.jsonl").read_text(encoding="utf-8")
+        assert "secret-token" not in index_text
+        assert "REDACTED" in index_text
+        assert (archive_root / JOB_LOG_NAME).exists()
         print("self-test passed")
 
 
@@ -952,6 +1216,9 @@ def main() -> None:
     parser.add_argument("--allow-private", action="store_true", help="Allow private/loopback download URLs. Default blocks them to prevent SSRF.")
     parser.add_argument("--max-bytes", type=int, default=0, help="Per-file max bytes. Env: FILE_ARCHIVE_MAX_BYTES")
     parser.add_argument("--timeout", type=int, default=0, help="Download timeout seconds. Env: FILE_ARCHIVE_TIMEOUT")
+    parser.add_argument("--async", dest="async_mode", action="store_true", help="Return 202 quickly and process archive jobs in the background. Env: FILE_ARCHIVE_ASYNC=1")
+    parser.add_argument("--sync", dest="sync_mode", action="store_true", help="Process /archive synchronously for compatibility/testing. Env: FILE_ARCHIVE_ASYNC=0")
+    parser.add_argument("--queue-size", type=int, default=0, help="Max queued async archive jobs. Env: FILE_ARCHIVE_QUEUE_SIZE")
     parser.add_argument("--self-test", action="store_true", help="Run local integration self-test and exit.")
     args = parser.parse_args()
     if args.self_test:

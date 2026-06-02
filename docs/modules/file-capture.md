@@ -66,7 +66,7 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.
    - 监听 `01000001.h5.aia.com`、`mpaas-mgw-fin.cn-shanghai.aliyuncs.com`、`sop.aia.com.cn`，用于确认 App 内产品页和 API 入口。
    - mPaaS 钩子 `requires-body=false,max-size=0`，只记录脱敏 URL、`Operation-Type`、`x-mgs-encryption` 加密标记、Content-Type/大小，不读取或保存加密正文。
    - H5 钩子最多读取 1MB 文本页面用于标题/产品名识别；SOP 钩子从 URL 事件参数中提取标题、产品名和事件名。
-   - SOP 点击事件会作为近实时上下文：如果“产品条款/说明书/彩页/一图”等点击事件比文件响应晚几十毫秒出现，脚本会把刚捕获的 PDF/Office 以及符合文档资料特征的大图反向补齐产品名和资料类型。
+   - SOP 点击事件会作为近实时上下文：如果“产品条款/说明书/彩页/一图”等点击事件比文件响应晚几十毫秒出现，脚本会把刚捕获的 PDF/Office 以及符合文档资料特征的大图反向补齐产品名和资料类型，并把脱敏后的 `appContext` / `sopContext` 随归档元数据发送给服务端。
    - 诊断记录只保存在 Surge 本地面板/CSV，并通过系统通知提示；不会把 mPaaS/H5/SOP 诊断记录发送到归档 webhook。只有被 SOP 事件补齐后的非诊断文件元数据会重发给归档服务。
 
 支持的 AIA 资料字段：
@@ -119,7 +119,7 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
 安装模块即可，无需填写 token 参数。
 ```
 
-保存后的目录示例（文件名统一为 `<产品名>_<资料类型>_<短hash>.<扩展名>`，不使用序号）：
+归档服务默认异步处理：`POST /archive` 会先返回 `202 Accepted`、`job_id` 和 `/jobs/{job_id}`，后台再下载、去重、retag 和写索引；如果需要调试同步路径，可临时请求 `/archive?sync=1`。保存后的目录示例（文件名统一为 `<产品名>_<资料类型>_<短hash>.<扩展名>`，不使用序号）：
 
 ```text
 /data/surge-file-archive/
@@ -149,6 +149,8 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
 - `FILE_ARCHIVE_ALLOWED_HOST_SUFFIXES`：允许下载的域名后缀，逗号分隔。
 - `FILE_ARCHIVE_MAX_BYTES`：单文件最大字节数，默认 80MB。
 - `FILE_ARCHIVE_HOST` / `FILE_ARCHIVE_PORT`：监听地址和端口。
+- `FILE_ARCHIVE_ASYNC`：默认 `1`，异步接收归档任务；设为 `0` 可回退同步处理。
+- `FILE_ARCHIVE_QUEUE_SIZE`：后台任务队列上限，默认 1000。
 
 建议通过 Nginx/Caddy 提供 HTTPS；不要长期裸奔暴露无 token 的归档服务。通用抓取可把 allowlist 扩大到需要的网站，AIA 抓取建议只允许 `www.aia.com.cn,nav.aia.com.cn,cws.aia.com.cn,01000001.h5.aia.com,nav-st.aia.com.cn,nav-uat.aia.com.cn`。mPaaS/SOP 诊断记录不需要服务端下载，因此不应加入归档服务 allowlist。
 
