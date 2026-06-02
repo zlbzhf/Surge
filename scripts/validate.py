@@ -38,6 +38,7 @@ FILE_CAPTURE_SCRIPT = ROOT / "modules" / "scripts" / "file-capture.js"
 FILE_CAPTURE_DOC = ROOT / "docs" / "modules" / "file-capture.md"
 FILE_ARCHIVE_SERVER = ROOT / "tools" / "file-archive-server.py"
 FILE_CAPTURE_TEST = ROOT / "tools" / "test-file-capture.js"
+FILE_ARCHIVE_TEST = ROOT / "tools" / "test-file-archive-server.py"
 GPL_LICENSE = ROOT / "modules" / "LICENSES" / "GPL-3.0.txt"
 BSBSB_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/bilibili-bsbsb.airborne.js"
 FILE_CAPTURE_SCRIPT_URL = "https://raw.githubusercontent.com/zlbzhf/Surge/main/modules/scripts/file-capture.js"
@@ -518,7 +519,7 @@ def check_bsbsb_module() -> list[Issue]:
 def check_file_capture_modules() -> list[Issue]:
     """Validate file-capture optional modules keep metadata-only and narrow-MITM boundaries."""
     issues: list[Issue] = []
-    required_files = [FILE_CAPTURE_MODULE, AIA_FILE_CAPTURE_MODULE, FILE_CAPTURE_SCRIPT, FILE_CAPTURE_DOC, FILE_ARCHIVE_SERVER, FILE_CAPTURE_TEST]
+    required_files = [FILE_CAPTURE_MODULE, AIA_FILE_CAPTURE_MODULE, FILE_CAPTURE_SCRIPT, FILE_CAPTURE_DOC, FILE_ARCHIVE_SERVER, FILE_CAPTURE_TEST, FILE_ARCHIVE_TEST]
     for path in required_files:
         if not path.exists():
             issues.append(Issue(path, 1, "missing file-capture optional module artifact"))
@@ -530,6 +531,7 @@ def check_file_capture_modules() -> list[Issue]:
     script_text = FILE_CAPTURE_SCRIPT.read_text(encoding="utf-8")
     archive_server_text = FILE_ARCHIVE_SERVER.read_text(encoding="utf-8")
     test_text = FILE_CAPTURE_TEST.read_text(encoding="utf-8")
+    archive_test_text = FILE_ARCHIVE_TEST.read_text(encoding="utf-8")
     doc_text = FILE_CAPTURE_DOC.read_text(encoding="utf-8")
 
     generic_checks = [
@@ -657,6 +659,8 @@ def check_file_capture_modules() -> list[Issue]:
         ("ArchiveRuntime", "archive server should have a bounded background job runtime"),
         ("/jobs/{job_id}", "archive server should expose job lookup semantics in responses"),
         ("202", "archive server should return HTTP 202 when async work is accepted"),
+        ("--worker-process", "archive server should isolate per-item downloads in a worker process"),
+        ("download hard timeout", "archive server should hard-timeout stalled per-item downloads"),
     ]
     for needle, message in archive_server_checks:
         if needle not in archive_server_text:
@@ -672,6 +676,13 @@ def check_file_capture_modules() -> list[Issue]:
     for needle, message in test_checks:
         if needle not in test_text:
             issues.append(Issue(FILE_CAPTURE_TEST, 1, message))
+
+    archive_test_checks = [
+        ("test_process_items_hard_times_out_stalled_download_and_continues", "archive server test should cover stalled download hard timeout"),
+    ]
+    for needle, message in archive_test_checks:
+        if needle not in archive_test_text:
+            issues.append(Issue(FILE_ARCHIVE_TEST, 1, message))
 
     doc_checks = [
         ("不进入主 `Surge.conf` 默认启用", "docs should state file-capture modules are optional"),
@@ -689,6 +700,7 @@ def check_file_capture_modules() -> list[Issue]:
         ("Surge 模块本体不直接下载二进制文件", "docs should clarify download behavior"),
         ("FILE_ARCHIVE_ASYNC", "docs should document async archive job configuration"),
         ("/jobs/{job_id}", "docs should document async job lookup"),
+        ("FILE_ARCHIVE_TIMEOUT + 5s", "docs should document per-item archive hard timeout"),
         ("/sps/sps_product_core/static/png", "docs should document AIA product-material image allowlist"),
         ("/cms/file/images", "docs should document generic AIA CMS banner/image suppression"),
     ]

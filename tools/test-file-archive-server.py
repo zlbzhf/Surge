@@ -11,9 +11,11 @@ import socketserver
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 SERVER_PATH = HERE / "file-archive-server.py"
@@ -202,6 +204,38 @@ class ArchiveServerBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshot["saved"], 1)
             self.assertTrue((archive_root / "index.csv").exists())
             self.assertTrue((archive_root / "archive-jobs.jsonl").exists())
+
+    def test_process_items_hard_times_out_stalled_download_and_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = server.ArchiveConfig(
+                root=Path(tmp) / "archive",
+                token="",
+                allowed_suffixes=("example.com",),
+                allow_private=False,
+                max_bytes=1024 * 1024,
+                timeout=1,
+            )
+
+            fake_worker = (
+                "import json, sys, time\n"
+                "payload=json.loads(sys.stdin.read())\n"
+                "name=payload['item'].get('filename')\n"
+                "if name == 'stalled.pdf': time.sleep(3)\n"
+                "print(json.dumps({'ok': True, 'records': [{'filename': name, 'kind': payload['item'].get('kind', 'pdf')}]}, ensure_ascii=False))\n"
+            )
+            items = [
+                {"kind": "pdf", "filename": "stalled.pdf", "downloadUrl": "https://files.example.com/stalled.pdf"},
+                {"kind": "pdf", "filename": "fast.pdf", "downloadUrl": "https://files.example.com/fast.pdf"},
+            ]
+            started = time.monotonic()
+            with mock.patch.object(server, "DOWNLOAD_HARD_TIMEOUT_GRACE", 0.1), mock.patch.object(server, "ARCHIVE_ITEM_WORKER_COMMAND", [sys.executable, "-c", fake_worker]):
+                saved, errors = server.process_items(items, config)
+            elapsed = time.monotonic() - started
+
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual([item["filename"] for item in saved], ["fast.pdf"])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("hard timeout", errors[0]["error"].lower())
 
     def test_send_json_suppresses_client_broken_pipe(self) -> None:
         class BrokenWriter:

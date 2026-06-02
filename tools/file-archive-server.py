@@ -26,6 +26,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -40,6 +41,9 @@ from typing import Any
 
 DEFAULT_MAX_BYTES = 80 * 1024 * 1024
 DEFAULT_TIMEOUT = 25
+DOWNLOAD_HARD_TIMEOUT_GRACE = 5
+DOWNLOAD_HARD_TIMEOUT_MIN = 1
+ARCHIVE_ITEM_WORKER_COMMAND: list[str] | None = None
 INDEX_FIELDS = [
     "archived_at",
     "product_name",
@@ -850,6 +854,102 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
             raise
 
 
+def _process_item_inline(item: dict[str, Any], config: ArchiveConfig) -> list[dict[str, Any]]:
+    if item_is_page(item):
+        return crawl_page_item(item, config)
+    return [download_one(item, config)]
+
+
+def _download_hard_timeout_seconds(config: ArchiveConfig) -> float:
+    return max(float(DOWNLOAD_HARD_TIMEOUT_MIN), float(config.timeout) + float(DOWNLOAD_HARD_TIMEOUT_GRACE))
+
+
+def _config_to_worker_payload(config: ArchiveConfig) -> dict[str, Any]:
+    return {
+        "root": str(config.root),
+        "token": config.token,
+        "allowed_suffixes": list(config.allowed_suffixes),
+        "allow_private": config.allow_private,
+        "max_bytes": config.max_bytes,
+        "timeout": config.timeout,
+        "async_mode": config.async_mode,
+        "queue_size": config.queue_size,
+    }
+
+
+def _config_from_worker_payload(data: dict[str, Any]) -> ArchiveConfig:
+    return ArchiveConfig(
+        root=Path(str(data.get("root") or "./file-archive")).expanduser().resolve(),
+        token=str(data.get("token") or ""),
+        allowed_suffixes=tuple(str(s).lower().lstrip(".") for s in data.get("allowed_suffixes") or []),
+        allow_private=bool(data.get("allow_private")),
+        max_bytes=int(data.get("max_bytes") or DEFAULT_MAX_BYTES),
+        timeout=int(data.get("timeout") or DEFAULT_TIMEOUT),
+        async_mode=bool(data.get("async_mode", True)),
+        queue_size=int(data.get("queue_size") or 1000),
+    )
+
+
+def _archive_worker_command() -> list[str]:
+    if ARCHIVE_ITEM_WORKER_COMMAND:
+        return [str(part) for part in ARCHIVE_ITEM_WORKER_COMMAND]
+    return [sys.executable or "/usr/bin/python3", str(Path(__file__).resolve()), "--worker-process"]
+
+
+def _run_worker_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    item = payload.get("item")
+    if not isinstance(item, dict):
+        raise ValueError("worker payload item must be an object")
+    config_data = payload.get("config")
+    if not isinstance(config_data, dict):
+        raise ValueError("worker payload config must be an object")
+    config = _config_from_worker_payload(config_data)
+    try:
+        return {"ok": True, "records": _process_item_inline(item, config)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:500]}
+
+
+def run_worker_process() -> None:
+    payload = json.loads(sys.stdin.read() or "{}")
+    real_stdout = sys.stdout
+    try:
+        sys.stdout = sys.stderr
+        result = _run_worker_payload(payload)
+    finally:
+        sys.stdout = real_stdout
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    sys.stdout.write("\n")
+
+
+def process_item_with_deadline(item: dict[str, Any], config: ArchiveConfig) -> list[dict[str, Any]]:
+    deadline = _download_hard_timeout_seconds(config)
+    payload = json.dumps({"item": item, "config": _config_to_worker_payload(config)}, ensure_ascii=False)
+    try:
+        completed = subprocess.run(
+            _archive_worker_command(),
+            input=payload,
+            text=True,
+            capture_output=True,
+            timeout=deadline,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"download hard timeout after {deadline:.1f}s") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip().replace("\n", " ")[:500]
+        raise RuntimeError(f"download worker exited with code {completed.returncode}: {detail}")
+    try:
+        result = json.loads(completed.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        detail = (completed.stderr or completed.stdout or "").strip().replace("\n", " ")[:500]
+        raise RuntimeError(f"download worker returned invalid JSON: {detail}") from exc
+    if result.get("ok"):
+        records = result.get("records") or []
+        return records if isinstance(records, list) else []
+    raise RuntimeError(str(result.get("error") or "download worker failed"))
+
+
 def process_items(items: list[Any], config: ArchiveConfig) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     saved: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -857,10 +957,7 @@ def process_items(items: list[Any], config: ArchiveConfig) -> tuple[list[dict[st
         if not isinstance(item, dict):
             continue
         try:
-            if item_is_page(item):
-                saved.extend(crawl_page_item(item, config))
-            else:
-                saved.append(download_one(item, config))
+            saved.extend(process_item_with_deadline(item, config))
         except Exception as exc:  # keep processing the batch
             errors.append({
                 "filename": sanitize_name(item.get("filename") or "", ""),
@@ -955,7 +1052,7 @@ class ArchiveRuntime:
 
 
 class ArchiveHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "SurgeFileArchive/1.1"
+    server_version = "SurgeFileArchive/1.2"
     config: ArchiveConfig
     runtime: ArchiveRuntime | None = None
 
@@ -993,7 +1090,7 @@ class ArchiveHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, {
                 "ok": True,
                 "service": "surge-file-archive",
-                "version": "1.1",
+                "version": "1.2",
                 "async": self.config.async_mode,
                 "queue_depth": queue_depth,
             })
@@ -1220,7 +1317,11 @@ def main() -> None:
     parser.add_argument("--sync", dest="sync_mode", action="store_true", help="Process /archive synchronously for compatibility/testing. Env: FILE_ARCHIVE_ASYNC=0")
     parser.add_argument("--queue-size", type=int, default=0, help="Max queued async archive jobs. Env: FILE_ARCHIVE_QUEUE_SIZE")
     parser.add_argument("--self-test", action="store_true", help="Run local integration self-test and exit.")
+    parser.add_argument("--worker-process", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.worker_process:
+        run_worker_process()
+        return
     if args.self_test:
         run_self_test()
         return

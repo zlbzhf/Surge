@@ -142,7 +142,7 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
       友邦某某保险_忽略小图标_f6a7b8c9.png
 ```
 
-归档服务会按 SHA256 去重；如果同一文件先被放进 `未关联产品/文件`，后续 SOP/产品页带来更明确的产品名和资料类型，会移动到更准确目录而不是复制一份。扩展名以 magic bytes / Content-Type 校正，不只信 URL 后缀。AIA 专用模块会优先在手机侧丢弃无明确资料上下文的 `/cms/file/images/` 广告图/banner；仍进入服务端的无明确标签大图才会进入 `待确认图片资料`，不强行归成 `一图` 或 `宣传彩页`。PDF 如安装了 `pdftotext`，服务端会读取前几页标题/正文信号，把误继承的“产品条款”纠正为 `费率表`、`产品说明书`、`营运规则` 等。
+归档服务会按 SHA256 去重；如果同一文件先被放进 `未关联产品/文件`，后续 SOP/产品页带来更明确的产品名和资料类型，会移动到更准确目录而不是复制一份。扩展名以 magic bytes / Content-Type 校正，不只信 URL 后缀。AIA 专用模块会优先在手机侧丢弃无明确资料上下文的 `/cms/file/images/` 广告图/banner；仍进入服务端的无明确标签大图才会进入 `待确认图片资料`，不强行归成 `一图` 或 `宣传彩页`。PDF 如安装了 `pdftotext`，服务端会读取前几页标题/正文信号，把误继承的“产品条款”纠正为 `费率表`、`产品说明书`、`营运规则` 等。后台下载按单条资料启动隔离 worker process，并在 `FILE_ARCHIVE_TIMEOUT + 5s` 触发 `download hard timeout`，避免单个不可达 CDN 地址长期卡住整个异步队列。
 
 服务端环境变量也可配置：
 
@@ -150,6 +150,7 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
 - `FILE_ARCHIVE_TOKEN`：Bearer token。
 - `FILE_ARCHIVE_ALLOWED_HOST_SUFFIXES`：允许下载的域名后缀，逗号分隔。
 - `FILE_ARCHIVE_MAX_BYTES`：单文件最大字节数，默认 80MB。
+- `FILE_ARCHIVE_TIMEOUT`：单次网络读写超时，默认 25 秒；服务端还会按单条资料设置 `FILE_ARCHIVE_TIMEOUT + 5s` 的硬超时。
 - `FILE_ARCHIVE_HOST` / `FILE_ARCHIVE_PORT`：监听地址和端口。
 - `FILE_ARCHIVE_ASYNC`：默认 `1`，异步接收归档任务；设为 `0` 可回退同步处理。
 - `FILE_ARCHIVE_QUEUE_SIZE`：后台任务队列上限，默认 1000。
