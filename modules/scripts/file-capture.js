@@ -20,7 +20,8 @@ const AIA_MATERIAL_FIELDS = [
   ['followUpService', '停售时间、停售原因及后续服务措施'],
 ];
 
-const AIA_MATERIAL_PAGE_RE = /宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|投保须知|公开披露|资料下载|相关资料/i;
+const AIA_MATERIAL_PAGE_RE = /一图|一图读懂|一张图|图解|宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|投保须知|公开披露|资料下载|相关资料/i;
+const AIA_EXPLICIT_IMAGE_MATERIAL_RE = /一图|一图读懂|一张图|图解|宣传彩页|彩页|one\s*page|onepage|infographic|poster|brochure|leaflet|flyer|color\s*page|colorpage/i;
 
 function parseArgs(input) {
   const out = {};
@@ -131,7 +132,8 @@ function classify(contentType, ext) {
 
 function inferMaterialType(pathname, filename, url) {
   const text = safeDecode([pathname, filename, url].join(' ')).toLowerCase();
-  if (text.indexOf('宣传彩页') >= 0 || text.indexOf('彩页') >= 0) return '宣传彩页';
+  if (/一图|一图读懂|一张图|图解|one\s*page|onepage|infographic/.test(text)) return '一图';
+  if (text.indexOf('宣传彩页') >= 0 || text.indexOf('彩页') >= 0 || /brochure|leaflet|flyer|color\s*page|colorpage|poster/.test(text)) return '宣传彩页';
   if (text.indexOf('产品合同') >= 0 || text.indexOf('保险合同') >= 0 || text.indexOf('合同样本') >= 0) return '产品合同';
   if (/\/prem\//i.test(text) || text.indexOf('费率') >= 0 || text.indexOf('rate') >= 0) return '费率表';
   if (/\/csv\//i.test(text) || text.indexOf('现金价值') >= 0) return '现金价值全表';
@@ -143,7 +145,8 @@ function inferMaterialType(pathname, filename, url) {
 
 function inferMaterialFromLabel(label, fallback) {
   const text = safeDecode(String(label || '')).replace(/\s+/g, ' ');
-  if (/宣传彩页|彩页/.test(text)) return '宣传彩页';
+  if (/一图|一图读懂|一张图|图解/.test(text) || /one\s*page|onepage|infographic/i.test(text)) return '一图';
+  if (/宣传彩页|彩页/.test(text) || /brochure|leaflet|flyer|color\s*page|colorpage|poster/i.test(text)) return '宣传彩页';
   if (/产品合同|保险合同|合同样本/.test(text)) return '产品合同';
   if (/产品条款|保险条款|条款/.test(text)) return '产品条款';
   if (/费率表|费率/.test(text)) return '费率表';
@@ -158,6 +161,7 @@ function inferMaterialFromSopEvent(eventName, title, detail) {
   const text = safeDecode([eventName || '', title || '', detail || ''].join(' ')).replace(/\s+/g, ' ');
   const byLabel = inferMaterialFromLabel(text, '');
   if (byLabel) return byLabel;
+  if (/One\s*Page|OnePage|OnePicture|Infographic|PictureClick|ImageClick|GraphClick/i.test(text)) return '一图';
   if (/Terms?Click|Clause|PolicyTerm|TermDetail/i.test(text)) return '产品条款';
   if (/Brochure|Leaflet|ColorPage|Poster|Flyer/i.test(text)) return '宣传彩页';
   if (/Instruction|ProductIntro|Description/i.test(text)) return '产品说明书/产品说明';
@@ -476,6 +480,15 @@ function attachContext(item, ttlMinutes) {
   return item;
 }
 
+function isRetaggableImage(item, ctx) {
+  const material = String((ctx && ctx.materialType) || '');
+  if (!material) return false;
+  const text = safeDecode([item && item.filename, item && item.url, item && item.sourceUrl, material, ctx && ctx.eventName, ctx && ctx.title].join(' '));
+  if (AIA_EXPLICIT_IMAGE_MATERIAL_RE.test(text)) return asInt(item && item.size) >= 80 * 1024;
+  if (/产品条款|保险条款|产品合同|保险合同|合同样本/.test(material)) return asInt(item && item.size) >= 300 * 1024;
+  return false;
+}
+
 function retagRecentFilesFromContext(ctx, options) {
   const opts = options || {};
   if (!ctx || !ctx.materialType) return [];
@@ -486,7 +499,7 @@ function retagRecentFilesFromContext(ctx, options) {
   const changed = [];
   const items = readItems().map((item) => {
     if (!item || item.kind === 'diagnostic' || item.kind === 'page') return item;
-    if (!['pdf', 'office', 'archive', 'binary'].includes(item.kind)) return item;
+    if (!['pdf', 'office', 'archive', 'binary'].includes(item.kind) && !(item.kind === 'image' && isRetaggableImage(item, ctx))) return item;
     const ts = Date.parse(item.ts || '') || 0;
     if (ts && Math.abs(now - ts) > ttlMs) return item;
     const itemRoot = rootDomain(item.host || '');

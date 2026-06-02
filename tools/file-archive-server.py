@@ -23,6 +23,7 @@ import posixpath
 import re
 import shutil
 import socket
+import struct
 import tempfile
 import threading
 import time
@@ -47,6 +48,11 @@ INDEX_FIELDS = [
     "relative_path",
     "source_url",
     "source",
+    "action",
+    "original_filename",
+    "detected_extension",
+    "classification_confidence",
+    "classification_reason",
 ]
 SAFE_NAME_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff._()（）\-+& ，,、【】\[\]《》]+")
 SECRET_QUERY_KEYS = re.compile(
@@ -58,8 +64,9 @@ FILE_EXTENSIONS = {
     "mp4", "mov", "m4v", "mkv", "webm", "avi", "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus",
     "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
 }
-MATERIAL_HINT_RE = re.compile(r"宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|投保须知|停售|后续服务|公开披露|资料", re.I)
+MATERIAL_HINT_RE = re.compile(r"一图|一图读懂|一张图|图解|宣传彩页|彩页|产品条款|保险条款|产品合同|保险合同|合同样本|费率表|现金价值|产品说明书|产品说明|投保须知|停售|后续服务|公开披露|资料", re.I)
 TEXT_PAGE_MAX_BYTES = 2 * 1024 * 1024
+GENERIC_MATERIALS = {"", "文件", "image", "图片", "待确认", "资料"}
 
 
 @dataclass
@@ -199,6 +206,120 @@ def filename_from_item(item: dict[str, Any], response, parsed_url: urllib.parse.
     return name[:180]
 
 
+def jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    if not data.startswith(b"\xff\xd8"):
+        return None
+    i = 2
+    while i + 9 < len(data):
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        while i < len(data) and data[i] == 0xFF:
+            i += 1
+        if i >= len(data):
+            break
+        marker = data[i]
+        i += 1
+        if marker in (0xD8, 0xD9, 0x01) or 0xD0 <= marker <= 0xD7:
+            continue
+        if i + 2 > len(data):
+            break
+        seg_len = struct.unpack(">H", data[i:i + 2])[0]
+        if seg_len < 2 or i + seg_len > len(data) + 2:
+            break
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = struct.unpack(">H", data[i + 3:i + 5])[0]
+            width = struct.unpack(">H", data[i + 5:i + 7])[0]
+            return width, height
+        i += seg_len
+    return None
+
+
+def detect_magic(head: bytes, fallback_content_type: str, fallback_name: str) -> dict[str, Any]:
+    content_type = (fallback_content_type or "").split(";", 1)[0].strip().lower()
+    suffix = Path(fallback_name).suffix.lower().lstrip(".")
+    detected = {"ext": suffix, "kind": guess_kind_from_url("x." + suffix) if suffix else "", "width": None, "height": None, "magic": ""}
+    if head.startswith(b"%PDF-"):
+        detected.update({"ext": "pdf", "kind": "pdf", "magic": "pdf"})
+    elif head.startswith(b"\xff\xd8"):
+        dims = jpeg_dimensions(head)
+        detected.update({"ext": "jpg", "kind": "image", "magic": "jpeg", "width": dims[0] if dims else None, "height": dims[1] if dims else None})
+    elif head.startswith(b"\x89PNG\r\n\x1a\n"):
+        width = height = None
+        if len(head) >= 24:
+            width, height = struct.unpack(">II", head[16:24])
+        detected.update({"ext": "png", "kind": "image", "magic": "png", "width": width, "height": height})
+    elif head.startswith((b"GIF87a", b"GIF89a")):
+        width = height = None
+        if len(head) >= 10:
+            width, height = struct.unpack("<HH", head[6:10])
+        detected.update({"ext": "gif", "kind": "image", "magic": "gif", "width": width, "height": height})
+    elif head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        detected.update({"ext": "webp", "kind": "image", "magic": "webp"})
+    elif head.startswith(b"PK\x03\x04"):
+        office_exts = {"docx", "xlsx", "pptx"}
+        detected.update({"ext": suffix or "zip", "kind": "office" if suffix in office_exts else "archive", "magic": "zip"})
+    elif content_type == "application/pdf":
+        detected.update({"ext": "pdf", "kind": "pdf", "magic": "content-type"})
+    elif content_type.startswith("image/"):
+        ext = content_type.split("/", 1)[1].replace("jpeg", "jpg")
+        detected.update({"ext": ext or suffix or "img", "kind": "image", "magic": "content-type"})
+    if not detected["ext"]:
+        guessed = mimetypes.guess_extension(content_type) if content_type else ""
+        detected["ext"] = (guessed or "").lstrip(".") or "bin"
+    return detected
+
+
+def infer_image_material(item: dict[str, Any], original_name: str, raw_url: str, detected: dict[str, Any], current_material: str) -> tuple[str, str, str]:
+    text = html.unescape(urllib.parse.unquote(" ".join([
+        str(item.get("materialType") or item.get("material_type") or ""),
+        str(item.get("filename") or ""), original_name, raw_url,
+        str(item.get("sourceUrl") or item.get("source_url") or ""),
+        str(item.get("pageTitle") or item.get("page_title") or ""),
+    ])))
+    if re.search(r"一图|一图读懂|一张图|图解|one\s*page|onepage|infographic", text, re.I):
+        return "一图", "high", "explicit_one_picture_signal"
+    if re.search(r"宣传彩页|产品彩页|彩页|brochure|leaflet|flyer|color\s*page|colorpage|poster", text, re.I):
+        return "宣传彩页", "high", "explicit_brochure_signal"
+    if current_material and current_material not in GENERIC_MATERIALS:
+        return current_material, "high", "explicit_context_material"
+    size = int(item.get("size") or 0)
+    if size and size < 80 * 1024:
+        return "忽略小图标", "low", "small_generic_image"
+    width = int(detected.get("width") or 0)
+    height = int(detected.get("height") or 0)
+    if width >= 700 and height >= width * 3:
+        return "待确认图片资料", "low", "tall_image_without_explicit_label"
+    if width >= 1200 and height >= 900:
+        return "待确认图片资料", "low", "large_document_like_image_without_explicit_label"
+    return "待确认图片资料", "low", "generic_image_without_material_label"
+
+
+def readable_filename(product: str, material: str, sha256: str, ext: str) -> str:
+    return sanitize_name(f"{product}_{material}_{sha256[:8]}", "file") + f".{ext.lstrip('.') or 'bin'}"
+
+
+def find_existing_by_hash(root: Path, sha256: str) -> Path | None:
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name in {"index.csv", "index.jsonl"} or path.name.startswith(".download-"):
+            continue
+        try:
+            if hashlib.sha256(path.read_bytes()).hexdigest() == sha256:
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def should_move_existing(existing: Path, target: Path, product: str, material: str) -> bool:
+    if existing == target:
+        return False
+    rel_parts = existing.parts
+    has_unknown = "未关联产品" in rel_parts or "文件" in rel_parts or "image" in rel_parts or "pdf" in rel_parts
+    has_better_context = product != "未关联产品" or material not in {"文件", "image", "pdf", "待确认图片资料"}
+    return has_unknown and has_better_context
+
+
 def dedupe_path(path: Path, sha256: str | None = None) -> Path:
     if not path.exists():
         return path
@@ -258,7 +379,9 @@ def guess_kind_from_url(raw_url: str) -> str:
 
 def infer_material_type(label: str, raw_url: str, fallback: str = "") -> str:
     text = html.unescape(urllib.parse.unquote(f"{label} {raw_url}"))
-    if re.search(r"宣传彩页|彩页", text):
+    if re.search(r"一图|一图读懂|一张图|图解|one\s*page|onepage|infographic", text, re.I):
+        return "一图"
+    if re.search(r"宣传彩页|彩页|brochure|leaflet|flyer|color\s*page|colorpage|poster", text, re.I):
         return "宣传彩页"
     if re.search(r"产品合同|保险合同|合同样本", text):
         return "产品合同"
@@ -483,6 +606,8 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
         },
     )
     opener = urllib.request.build_opener(SafeRedirectHandler(config))
+    staging_dir = config.root / "_pending"
+    staging_dir.mkdir(parents=True, exist_ok=True)
     with opener.open(req, timeout=config.timeout) as response:
         final_url = response.geturl()
         validate_download_url(final_url, config)
@@ -490,14 +615,11 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
         if content_length and int(content_length) > config.max_bytes:
             raise ValueError(f"file too large: {content_length} > {config.max_bytes}")
         final_parsed = urllib.parse.urlparse(final_url)
-        product = sanitize_name(item.get("productName") or item.get("product_name"), "未关联产品")
-        material = sanitize_name(item.get("materialType") or item.get("material_type") or item.get("kind"), "文件")
-        target_dir = config.root / product / material
-        target_dir.mkdir(parents=True, exist_ok=True)
-        filename = filename_from_item(item, response, final_parsed or parsed)
-        temp_fd, temp_name = tempfile.mkstemp(prefix=".download-", dir=str(target_dir))
+        original_filename = filename_from_item(item, response, final_parsed or parsed)
+        temp_fd, temp_name = tempfile.mkstemp(prefix=".download-", dir=str(staging_dir))
         size = 0
         digest = hashlib.sha256()
+        head = b""
         try:
             with os.fdopen(temp_fd, "wb") as f:
                 while True:
@@ -507,12 +629,65 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
                     size += len(chunk)
                     if size > config.max_bytes:
                         raise ValueError(f"file too large while streaming: {size} > {config.max_bytes}")
+                    if len(head) < 1024 * 1024:
+                        head += chunk[: max(0, 1024 * 1024 - len(head))]
                     digest.update(chunk)
                     f.write(chunk)
             sha256 = digest.hexdigest()
-            target = dedupe_path(target_dir / filename, sha256)
-            if target.exists():
-                Path(temp_name).unlink(missing_ok=True)
+            detected = detect_magic(head, response.headers.get("Content-Type", ""), original_filename)
+            product = sanitize_name(item.get("productName") or item.get("product_name"), "未关联产品")
+            raw_material = sanitize_name(item.get("materialType") or item.get("material_type") or item.get("kind"), "文件")
+            final_kind = detected.get("kind") or item.get("kind", "")
+            material = "待确认PDF资料" if final_kind == "pdf" and raw_material in GENERIC_MATERIALS else raw_material
+            confidence = ""
+            reason = ""
+            if final_kind == "image":
+                image_item = dict(item)
+                image_item["size"] = size
+                material, confidence, reason = infer_image_material(image_item, original_filename, raw_url, detected, raw_material)
+                material = sanitize_name(material, "待确认图片资料")
+                if material == "忽略小图标":
+                    temp_path = Path(temp_name)
+                    temp_path.unlink(missing_ok=True)
+                    return {
+                        "archived_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "product_name": product,
+                        "material_type": material,
+                        "kind": final_kind,
+                        "filename": original_filename,
+                        "size": size,
+                        "sha256": sha256,
+                        "relative_path": "",
+                        "source_url": str(item.get("url") or redact_url(final_url)),
+                        "source": item.get("source", ""),
+                        "action": "skipped_small_image",
+                        "original_filename": original_filename,
+                        "detected_extension": detected.get("ext", ""),
+                        "classification_confidence": confidence,
+                        "classification_reason": reason,
+                    }
+            target_dir = config.root / product / material
+            target_dir.mkdir(parents=True, exist_ok=True)
+            filename = readable_filename(product, material, sha256, str(detected.get("ext") or Path(original_filename).suffix.lstrip(".") or "bin"))
+            target = target_dir / filename
+            existing = find_existing_by_hash(config.root, sha256)
+            temp_path = Path(temp_name)
+            if existing:
+                temp_path.unlink(missing_ok=True)
+                if should_move_existing(existing, target, product, material):
+                    target = dedupe_path(target, sha256)
+                    if target.exists() and target != existing:
+                        existing.unlink(missing_ok=True)
+                        action = "exists"
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(existing), target)
+                        action = "moved"
+                else:
+                    target = existing
+                    action = "exists"
+            elif target.exists():
+                temp_path.unlink(missing_ok=True)
                 action = "exists"
             else:
                 shutil.move(temp_name, target)
@@ -522,7 +697,7 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
                 "archived_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "product_name": product,
                 "material_type": material,
-                "kind": item.get("kind", ""),
+                "kind": final_kind,
                 "filename": target.name,
                 "size": size,
                 "sha256": sha256,
@@ -530,6 +705,10 @@ def download_one(item: dict[str, Any], config: ArchiveConfig) -> dict[str, Any]:
                 "source_url": str(item.get("url") or redact_url(final_url)),
                 "source": item.get("source", ""),
                 "action": action,
+                "original_filename": original_filename,
+                "detected_extension": detected.get("ext", ""),
+                "classification_confidence": confidence,
+                "classification_reason": reason,
             }
             append_indexes(config, record)
             return record
@@ -653,6 +832,13 @@ def run_self_test() -> None:
             "schema": "surge-file-capture.archive.v1",
             "items": [
                 {
+                    "kind": "pdf",
+                    "filename": "random-static-key.pdf",
+                    "url": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(sample.name)}",
+                    "downloadUrl": f"http://127.0.0.1:{source_port}/{urllib.parse.quote(sample.name)}",
+                    "source": "self-test-unknown-first",
+                },
+                {
                     "productName": "友邦测试产品",
                     "materialType": "产品条款",
                     "kind": "pdf",
@@ -682,13 +868,18 @@ def run_self_test() -> None:
             body = json.loads(response.read().decode("utf-8"))
         source_server.shutdown()
         archive_server.shutdown()
-        expected = archive_root / "友邦测试产品" / "产品条款" / "友邦测试条款.pdf"
-        expected_brochure = archive_root / "友邦测试产品" / "宣传彩页" / "宣传彩页.pdf"
-        expected_contract = archive_root / "友邦测试产品" / "产品合同" / "产品合同.pdf"
+        sample_hash = hashlib.sha256(sample.read_bytes()).hexdigest()[:8]
+        brochure_hash = hashlib.sha256(brochure.read_bytes()).hexdigest()[:8]
+        contract_hash = hashlib.sha256(contract.read_bytes()).hexdigest()[:8]
+        expected = archive_root / "友邦测试产品" / "产品条款" / f"友邦测试产品_产品条款_{sample_hash}.pdf"
+        expected_brochure = archive_root / "友邦测试产品" / "宣传彩页" / f"友邦测试产品_宣传彩页_{brochure_hash}.pdf"
+        expected_contract = archive_root / "友邦测试产品" / "产品合同" / f"友邦测试产品_产品合同_{contract_hash}.pdf"
+        unknown_sample = archive_root / "未关联产品" / "pdf" / f"未关联产品_pdf_{sample_hash}.pdf"
         assert expected.exists(), expected
+        assert not unknown_sample.exists(), unknown_sample
         assert expected_brochure.exists(), expected_brochure
         assert expected_contract.exists(), expected_contract
-        assert body["saved"] == 3, body
+        assert body["saved"] == 4, body
         assert (archive_root / "index.csv").exists()
         print("self-test passed")
 

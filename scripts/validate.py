@@ -563,7 +563,7 @@ def check_file_capture_modules() -> list[Issue]:
         ("aia.file.capture.export", "AIA module should expose a CSV export panel"),
         ("archive_url=https%3A%2F%2Faia.zuiai.ggff.net%2Farchive", "AIA module should hard-code the archive endpoint to avoid multi-argument editor failures"),
         ("retag_seconds=20", "AIA SOP diagnostic hook should retag late-arriving PDF/Office responses"),
-        ("?cb=aia-h5-mpaas-diagnostic-v2", "AIA script path should cache-bust the H5/mPaaS diagnostic module URL"),
+        ("?cb=aia-file-archive-v4", "AIA script path should cache-bust the file archive classification module URL"),
         ("archive_page=1", "AIA context hook should submit product pages for server-side file extraction"),
     ]
     for needle, message in aia_checks:

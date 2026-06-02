@@ -66,7 +66,7 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.
    - 监听 `01000001.h5.aia.com`、`mpaas-mgw-fin.cn-shanghai.aliyuncs.com`、`sop.aia.com.cn`，用于确认 App 内产品页和 API 入口。
    - mPaaS 钩子 `requires-body=false,max-size=0`，只记录脱敏 URL、`Operation-Type`、`x-mgs-encryption` 加密标记、Content-Type/大小，不读取或保存加密正文。
    - H5 钩子最多读取 1MB 文本页面用于标题/产品名识别；SOP 钩子从 URL 事件参数中提取标题、产品名和事件名。
-   - SOP 点击事件会作为近实时上下文：如果“产品条款/说明书/彩页”等点击事件比 PDF 响应晚几十毫秒出现，脚本会把刚捕获的 PDF/Office 反向补齐产品名和资料类型。
+   - SOP 点击事件会作为近实时上下文：如果“产品条款/说明书/彩页/一图”等点击事件比文件响应晚几十毫秒出现，脚本会把刚捕获的 PDF/Office 以及符合文档资料特征的大图反向补齐产品名和资料类型。
    - 诊断记录只保存在 Surge 本地面板/CSV，并通过系统通知提示；不会把 mPaaS/H5/SOP 诊断记录发送到归档 webhook。只有被 SOP 事件补齐后的非诊断文件元数据会重发给归档服务。
 
 支持的 AIA 资料字段：
@@ -119,24 +119,28 @@ AIA 专用版当前为联调测试版：不暴露任何可编辑参数，归档�
 安装模块即可，无需填写 token 参数。
 ```
 
-保存后的目录示例：
+保存后的目录示例（文件名统一为 `<产品名>_<资料类型>_<短hash>.<扩展名>`，不使用序号）：
 
 ```text
 /data/surge-file-archive/
   index.csv
   index.jsonl
   友邦某某保险/
+    一图/
+      友邦某某保险_一图_a1b2c3d4.jpg
     宣传彩页/
-      xxx.pdf
+      友邦某某保险_宣传彩页_b2c3d4e5.pdf
     产品条款/
-      xxx.pdf
-    产品合同/
-      xxx.pdf
-    费率表/
-      xxx.pdf
-    现金价值全表/
-      xxx.pdf
+      友邦某某保险_产品条款_c3d4e5f6.pdf
+    待确认图片资料/
+      友邦某某保险_待确认图片资料_d4e5f6a7.jpg
+    待确认PDF资料/
+      友邦某某保险_待确认PDF资料_e5f6a7b8.pdf
+    忽略小图标/
+      友邦某某保险_忽略小图标_f6a7b8c9.png
 ```
+
+归档服务会按 SHA256 去重；如果同一文件先被放进 `未关联产品/文件`，后续 SOP/产品页带来更明确的产品名和资料类型，会移动到更准确目录而不是复制一份。扩展名以 magic bytes / Content-Type 校正，不只信 URL 后缀。无明确标签的大图进入 `待确认图片资料`，小图标类素材隔离到 `忽略小图标`/新捕获直接跳过，避免误判成一图或彩页。
 
 服务端环境变量也可配置：
 
@@ -166,6 +170,6 @@ AIA 专用版当前不暴露额外参数；固定使用安全默认值：`keep=2
 
 - Surge 模块本体不直接下载二进制文件；只有你配置归档 webhook 后，服务端才会下载。
 - 不保存 Cookie、请求头、账号信息或响应正文。
-- 不解析 PDF/图片内容。
+- 不做 OCR，也不解析 PDF 正文；归档服务只读取文件头/magic bytes 和图片尺寸来校正扩展名、排除图标并做低置信分类。
 - 不绕过登录、权限或付费限制。
 - 不进入主 `Surge.conf` 默认启用。
