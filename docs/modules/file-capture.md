@@ -79,7 +79,7 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.
 
 ## 面板
 
-模块会添加两个面板：
+模块会添加三个面板：
 
 - `文件捕获` / `AIA 文件捕获`：显示最近捕获和分类数量。
 - `文件捕获导出` / `AIA 文件捕获导出`：输出 CSV 文本，字段包括：
@@ -92,6 +92,7 @@ hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.
   - `host`
   - `url`
   - `source`
+- `文件捕获清空` / `AIA 文件捕获清空`：默认只显示静态提示；手动点面板刷新按钮才会清空 Surge 本地捕获记录和上下文缓存，不删除 VPS 已归档文件。
 
 ## 归档 webhook：真正保存文件
 

@@ -14,6 +14,7 @@ aia.file.capture.clear = type=generic,timeout=5,script-path=https://raw.githubus
 [Panel]
 AIA 文件捕获 = script-name=aia.file.capture.panel,update-interval=60
 AIA 文件捕获导出 = script-name=aia.file.capture.export,update-interval=3600
+AIA 文件捕获清空 = title="点刷新清空本地记录",content="只清 Surge 面板/上下文缓存，不删除 VPS 已归档文件。",style=alert,script-name=aia.file.capture.clear
 
 [MITM]
 hostname = %APPEND% www.aia.com.cn, cws.aia.com.cn, nav.aia.com.cn, 01000001.h5.aia.com, mpaas-mgw-fin.cn-shanghai.aliyuncs.com, sop.aia.com.cn, nav-st.aia.com.cn, nav-uat.aia.com.cn
